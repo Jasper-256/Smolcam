@@ -7,7 +7,7 @@ class CameraManager: NSObject, ObservableObject {
     @Published var previewImage: UIImage?
     @Published var capturedImage: UIImage?
     @Published var isFront = false
-    @Published var bitsPerComponent = 4
+    @Published var bitsPerComponent = 2
     
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()

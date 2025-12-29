@@ -57,7 +57,11 @@ struct ContentView: View {
                 .background(Color.white.opacity(0.2))
                 .cornerRadius(8)
                 .padding(.horizontal, 30)
-                .padding(.bottom, 30)
+                
+                Text("\(1 << (camera.bitsPerComponent * 3)) colors")
+                    .foregroundColor(.gray)
+                    .font(.system(size: 14))
+                    .padding(.bottom, 30)
             }
         }
         .statusBarHidden(true)
