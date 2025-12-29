@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
     @State private var fadeOpacity = 0.0
+    @State private var iconRotation: Double = 0
     
     var body: some View {
         ZStack {
@@ -32,11 +33,19 @@ struct ContentView: View {
                     }
                     
                     HStack {
+                        Button { openPhotos() } label: {
+                            Image(systemName: "photo")
+                                .font(.system(size: 24))
+                                .foregroundColor(.white)
+                                .rotationEffect(.degrees(iconRotation))
+                                .frame(width: 70, height: 70)
+                        }
                         Spacer()
                         Button(action: flip) {
                             Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
                                 .font(.system(size: 28))
                                 .foregroundColor(.white)
+                                .rotationEffect(.degrees(iconRotation))
                                 .frame(width: 70, height: 70)
                         }
                     }
@@ -65,13 +74,43 @@ struct ContentView: View {
             }
         }
         .statusBarHidden(true)
-        .onAppear { camera.start() }
-        .onDisappear { camera.stop() }
+        .onAppear {
+            camera.start()
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            updateIconRotation()
+        }
+        .onDisappear {
+            camera.stop()
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            updateIconRotation()
+        }
     }
     
     private func flip() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         camera.flipCamera()
+    }
+    
+    private func openPhotos() {
+        if let url = URL(string: "photos-redirect://") {
+            UIApplication.shared.open(url)
+        }
+    }
+    
+    private func updateIconRotation() {
+        let target: Double = switch UIDevice.current.orientation {
+        case .landscapeLeft: 90
+        case .landscapeRight: -90
+        case .portraitUpsideDown: 180
+        default: 0
+        }
+        var delta = target - iconRotation.truncatingRemainder(dividingBy: 360)
+        if delta > 180 { delta -= 360 }
+        if delta < -180 { delta += 360 }
+        let duration = abs(delta) > 135 ? 0.4 : 0.3
+        withAnimation(.easeInOut(duration: duration)) { iconRotation += delta }
     }
     
     private func capture() {
