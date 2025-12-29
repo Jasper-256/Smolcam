@@ -22,18 +22,37 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                 }
                 .aspectRatio(480.0/640.0, contentMode: .fit)
+                .onTapGesture(count: 2) { flip() }
                 
-                Button(action: capture) {
-                    Circle()
-                        .stroke(Color.white, lineWidth: 4)
-                        .frame(width: 70, height: 70)
+                ZStack {
+                    Button(action: capture) {
+                        Circle()
+                            .stroke(Color.white, lineWidth: 4)
+                            .frame(width: 70, height: 70)
+                    }
+                    
+                    HStack {
+                        Spacer()
+                        Button(action: flip) {
+                            Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
+                                .font(.system(size: 28))
+                                .foregroundColor(.white)
+                                .frame(width: 70, height: 70)
+                        }
+                    }
                 }
+                .padding(.horizontal, 30)
                 .padding(.bottom, 30)
             }
         }
         .statusBarHidden(true)
         .onAppear { camera.start() }
         .onDisappear { camera.stop() }
+    }
+    
+    private func flip() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        camera.flipCamera()
     }
     
     private func capture() {

@@ -6,6 +6,7 @@ import CoreMotion
 class CameraManager: NSObject, ObservableObject {
     @Published var previewImage: UIImage?
     @Published var capturedImage: UIImage?
+    @Published var isFront = false
     
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
@@ -34,6 +35,35 @@ class CameraManager: NSObject, ObservableObject {
         
         if let connection = output.connection(with: .video) {
             connection.videoRotationAngle = 90
+        }
+    }
+    
+    func flipCamera() {
+        queue.async {
+            self.session.beginConfiguration()
+            
+            if let current = self.session.inputs.first as? AVCaptureDeviceInput {
+                self.session.removeInput(current)
+            }
+            
+            let newPosition: AVCaptureDevice.Position = self.isFront ? .back : .front
+            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition),
+                  let input = try? AVCaptureDeviceInput(device: device),
+                  self.session.canAddInput(input) else {
+                self.session.commitConfiguration()
+                return
+            }
+            
+            self.session.addInput(input)
+            
+            if let connection = self.output.connection(with: .video) {
+                connection.videoRotationAngle = 90
+                connection.isVideoMirrored = newPosition == .front
+            }
+            
+            self.session.commitConfiguration()
+            
+            DispatchQueue.main.async { self.isFront = !self.isFront }
         }
     }
     
@@ -96,9 +126,9 @@ class CameraManager: NSObject, ObservableObject {
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         
         for i in stride(from: 0, to: pixelData.count, by: 4) {
-            pixelData[i] = pixelData[i] < 128 ? 0 : 255
-            pixelData[i+1] = pixelData[i+1] < 128 ? 0 : 255
-            pixelData[i+2] = pixelData[i+2] < 128 ? 0 : 255
+            pixelData[i] = (pixelData[i] / 64) * 85
+            pixelData[i+1] = (pixelData[i+1] / 64) * 85
+            pixelData[i+2] = (pixelData[i+2] / 64) * 85
         }
         
         guard let outputContext = CGContext(
