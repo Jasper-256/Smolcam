@@ -1,6 +1,7 @@
 import AVFoundation
 import UIKit
 import Combine
+import CoreMotion
 
 class CameraManager: NSObject, ObservableObject {
     @Published var previewImage: UIImage?
@@ -9,11 +10,14 @@ class CameraManager: NSObject, ObservableObject {
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "camera")
+    private let motionManager = CMMotionManager()
     private var shouldCapture = false
+    private var captureOrientation: UIImage.Orientation = .up
     
     override init() {
         super.init()
         setupSession()
+        startMotionUpdates()
     }
     
     private func setupSession() {
@@ -33,6 +37,23 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
     
+    private func startMotionUpdates() {
+        motionManager.accelerometerUpdateInterval = 0.1
+        motionManager.startAccelerometerUpdates()
+    }
+    
+    private func currentOrientation() -> UIImage.Orientation {
+        guard let data = motionManager.accelerometerData else { return .up }
+        let x = data.acceleration.x
+        let y = data.acceleration.y
+        
+        if abs(y) > abs(x) {
+            return y < 0 ? .up : .down
+        } else {
+            return x < 0 ? .left : .right
+        }
+    }
+    
     func start() {
         queue.async { self.session.startRunning() }
     }
@@ -42,10 +63,11 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     func capture() {
+        captureOrientation = currentOrientation()
         shouldCapture = true
     }
     
-    private func process(_ image: UIImage) -> UIImage {
+    private func process(_ image: UIImage, forSave: Bool = false) -> UIImage {
         let size = CGSize(width: 480, height: 640)
         UIGraphicsBeginImageContext(size)
         image.draw(in: CGRect(origin: .zero, size: size))
@@ -73,11 +95,10 @@ class CameraManager: NSObject, ObservableObject {
         
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         
-        // 3-bit color: 1 bit per channel (8 colors total)
         for i in stride(from: 0, to: pixelData.count, by: 4) {
-            pixelData[i] = pixelData[i] < 128 ? 0 : 255     // R
-            pixelData[i+1] = pixelData[i+1] < 128 ? 0 : 255 // G
-            pixelData[i+2] = pixelData[i+2] < 128 ? 0 : 255 // B
+            pixelData[i] = pixelData[i] < 128 ? 0 : 255
+            pixelData[i+1] = pixelData[i+1] < 128 ? 0 : 255
+            pixelData[i+2] = pixelData[i+2] < 128 ? 0 : 255
         }
         
         guard let outputContext = CGContext(
@@ -91,7 +112,55 @@ class CameraManager: NSObject, ObservableObject {
         ),
         let outputImage = outputContext.makeImage() else { return resized }
         
-        return UIImage(cgImage: outputImage)
+        let result = UIImage(cgImage: outputImage)
+        
+        if forSave {
+            return rotateForSave(result)
+        }
+        return result
+    }
+    
+    private func rotateForSave(_ image: UIImage) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+        
+        let orientation = captureOrientation
+        if orientation == .up { return image }
+        
+        let width = cgImage.width
+        let height = cgImage.height
+        
+        var transform = CGAffineTransform.identity
+        var newSize = CGSize(width: width, height: height)
+        
+        switch orientation {
+        case .down:
+            transform = transform.translatedBy(x: CGFloat(width), y: CGFloat(height)).rotated(by: .pi)
+        case .left:
+            newSize = CGSize(width: height, height: width)
+            transform = transform.translatedBy(x: CGFloat(height), y: 0).rotated(by: .pi / 2)
+        case .right:
+            newSize = CGSize(width: height, height: width)
+            transform = transform.translatedBy(x: 0, y: CGFloat(width)).rotated(by: -.pi / 2)
+        default:
+            return image
+        }
+        
+        guard let colorSpace = cgImage.colorSpace,
+              let ctx = CGContext(
+                data: nil,
+                width: Int(newSize.width),
+                height: Int(newSize.height),
+                bitsPerComponent: cgImage.bitsPerComponent,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: cgImage.bitmapInfo.rawValue
+              ) else { return image }
+        
+        ctx.concatenate(transform)
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        
+        guard let rotated = ctx.makeImage() else { return image }
+        return UIImage(cgImage: rotated)
     }
 }
 
@@ -109,9 +178,8 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             
             if self.shouldCapture {
                 self.shouldCapture = false
-                self.capturedImage = self.previewImage
+                self.capturedImage = self.process(uiImage, forSave: true)
             }
         }
     }
 }
-

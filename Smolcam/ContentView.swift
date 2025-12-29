@@ -31,6 +31,7 @@ struct ContentView: View {
                 .padding(.bottom, 30)
             }
         }
+        .statusBarHidden(true)
         .onAppear { camera.start() }
         .onDisappear { camera.stop() }
     }
