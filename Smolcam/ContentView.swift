@@ -42,6 +42,21 @@ struct ContentView: View {
                     }
                 }
                 .padding(.horizontal, 30)
+                
+                HStack(spacing: 0) {
+                    ForEach(1...8, id: \.self) { n in
+                        Button { camera.bitsPerComponent = n } label: {
+                            Text("\(n)")
+                                .font(.system(size: 14, weight: camera.bitsPerComponent == n ? .bold : .regular))
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(camera.bitsPerComponent == n ? Color.white : Color.clear)
+                                .foregroundColor(camera.bitsPerComponent == n ? .black : .white)
+                        }
+                    }
+                }
+                .background(Color.white.opacity(0.2))
+                .cornerRadius(8)
+                .padding(.horizontal, 30)
                 .padding(.bottom, 30)
             }
         }

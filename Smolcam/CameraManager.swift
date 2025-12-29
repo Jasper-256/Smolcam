@@ -7,6 +7,7 @@ class CameraManager: NSObject, ObservableObject {
     @Published var previewImage: UIImage?
     @Published var capturedImage: UIImage?
     @Published var isFront = false
+    @Published var bitsPerComponent = 4
     
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
@@ -125,10 +126,14 @@ class CameraManager: NSObject, ObservableObject {
         
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         
+        let levels = 1 << bitsPerComponent
+        let divisor = 256 / levels
+        let maxLevel = levels - 1
+        
         for i in stride(from: 0, to: pixelData.count, by: 4) {
-            pixelData[i] = (pixelData[i] / 64) * 85
-            pixelData[i+1] = (pixelData[i+1] / 64) * 85
-            pixelData[i+2] = (pixelData[i+2] / 64) * 85
+            pixelData[i] = UInt8(Int(pixelData[i]) / divisor * 255 / maxLevel)
+            pixelData[i+1] = UInt8(Int(pixelData[i+1]) / divisor * 255 / maxLevel)
+            pixelData[i+2] = UInt8(Int(pixelData[i+2]) / divisor * 255 / maxLevel)
         }
         
         guard let outputContext = CGContext(
