@@ -1,55 +1,57 @@
-//
-//  ContentView.swift
-//  Smolcam
-//
-//  Created by Jasper Morgal on 2025-12-29.
-//
-
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
-
+    @StateObject private var camera = CameraManager()
+    @State private var fadeOpacity = 0.0
+    
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        ZStack {
+            Color.black.ignoresSafeArea()
+            
+            VStack(spacing: 20) {
+                ZStack {
+                    if let preview = camera.previewImage {
+                        Image(uiImage: preview)
+                            .resizable()
+                            .interpolation(.none)
+                            .aspectRatio(contentMode: .fit)
                     }
+                    
+                    Color.black
+                        .opacity(fadeOpacity)
+                        .allowsHitTesting(false)
                 }
-                .onDelete(perform: deleteItems)
+                .aspectRatio(480.0/640.0, contentMode: .fit)
+                
+                Button(action: capture) {
+                    Circle()
+                        .stroke(Color.white, lineWidth: 4)
+                        .frame(width: 70, height: 70)
+                }
+                .padding(.bottom, 30)
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
+        }
+        .onAppear { camera.start() }
+        .onDisappear { camera.stop() }
+    }
+    
+    private func capture() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        camera.capture()
+        
+        withAnimation(.easeInOut(duration: 0.2)) {
+            fadeOpacity = 1.0
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                fadeOpacity = 0.0
             }
-        } detail: {
-            Text("Select an item")
         }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if let img = camera.capturedImage {
+                UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
             }
         }
     }
@@ -57,5 +59,4 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
