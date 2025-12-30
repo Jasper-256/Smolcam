@@ -100,7 +100,10 @@ struct ContentView: View {
     }
     
     private func updateIconRotation() {
-        let target: Double = switch UIDevice.current.orientation {
+        let orientation = UIDevice.current.orientation
+        guard orientation != .faceUp, orientation != .faceDown, orientation != .unknown else { return }
+        
+        let target: Double = switch orientation {
         case .landscapeLeft: 90
         case .landscapeRight: -90
         case .portraitUpsideDown: 180

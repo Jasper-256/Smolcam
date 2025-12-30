@@ -7,7 +7,7 @@ class CameraManager: NSObject, ObservableObject {
     @Published var previewImage: UIImage?
     @Published var capturedImage: UIImage?
     @Published var isFront = false
-    @Published var bitsPerComponent = 2
+    @Published var bitsPerComponent = 4
     
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
@@ -15,6 +15,7 @@ class CameraManager: NSObject, ObservableObject {
     private let motionManager = CMMotionManager()
     private var shouldCapture = false
     private var captureOrientation: UIImage.Orientation = .up
+    private var lastOrientation: UIImage.Orientation = .up
     
     override init() {
         super.init()
@@ -70,20 +71,16 @@ class CameraManager: NSObject, ObservableObject {
     
     private func startMotionUpdates() {
         motionManager.accelerometerUpdateInterval = 0.1
-        motionManager.startAccelerometerUpdates()
-    }
-    
-    private func currentOrientation() -> UIImage.Orientation {
-        guard let data = motionManager.accelerometerData else { return .up }
-        let x = data.acceleration.x
-        let y = data.acceleration.y
-        
-        if abs(y) > abs(x) {
-            return y < 0 ? .up : .down
-        } else {
-            return x < 0 ? .left : .right
+        motionManager.startAccelerometerUpdates(to: .main) { [weak self] data, _ in
+            guard let self, let data else { return }
+            let x = data.acceleration.x
+            let y = data.acceleration.y
+            guard max(abs(x), abs(y)) > 0.5 else { return }
+            self.lastOrientation = abs(y) > abs(x) ? (y < 0 ? .up : .down) : (x < 0 ? .left : .right)
         }
     }
+    
+    private func currentOrientation() -> UIImage.Orientation { lastOrientation }
     
     func start() {
         queue.async { self.session.startRunning() }
