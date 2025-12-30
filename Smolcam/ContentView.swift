@@ -1,4 +1,6 @@
 import SwiftUI
+import Photos
+import ImageIO
 
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
@@ -131,11 +133,31 @@ struct ContentView: View {
         }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if let img = camera.capturedImage {
-                UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
+            if let img = camera.capturedImage,
+               let cgImage = img.cgImage,
+               let data = pngDataWithMetadata(cgImage, bits: camera.bitsPerComponent) {
+                PHPhotoLibrary.shared().performChanges {
+                    let request = PHAssetCreationRequest.forAsset()
+                    request.addResource(with: .photo, data: data, options: nil)
+                }
             }
         }
     }
+}
+
+private func pngDataWithMetadata(_ cgImage: CGImage, bits: Int) -> Data? {
+    let data = NSMutableData()
+    guard let dest = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+    
+    let metadata: [String: Any] = [
+        kCGImagePropertyExifDictionary as String: [
+            kCGImagePropertyExifLensModel as String: "Smolcam \(bits)-bit"
+        ]
+    ]
+    
+    CGImageDestinationAddImage(dest, cgImage, metadata as CFDictionary)
+    CGImageDestinationFinalize(dest)
+    return data as Data
 }
 
 #Preview {
