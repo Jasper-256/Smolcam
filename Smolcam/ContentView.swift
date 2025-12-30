@@ -76,18 +76,9 @@ struct ContentView: View {
             }
         }
         .statusBarHidden(true)
-        .onAppear {
-            camera.start()
-            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-            updateIconRotation()
-        }
-        .onDisappear {
-            camera.stop()
-            UIDevice.current.endGeneratingDeviceOrientationNotifications()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
-            updateIconRotation()
-        }
+        .onAppear { camera.start() }
+        .onDisappear { camera.stop() }
+        .onChange(of: camera.deviceOrientation) { updateIconRotation() }
     }
     
     private func flip() {
@@ -102,13 +93,10 @@ struct ContentView: View {
     }
     
     private func updateIconRotation() {
-        let orientation = UIDevice.current.orientation
-        guard orientation != .faceUp, orientation != .faceDown, orientation != .unknown else { return }
-        
-        let target: Double = switch orientation {
-        case .landscapeLeft: 90
-        case .landscapeRight: -90
-        case .portraitUpsideDown: 180
+        let target: Double = switch camera.deviceOrientation {
+        case .left: 90
+        case .right: -90
+        case .down: 180
         default: 0
         }
         var delta = target - iconRotation.truncatingRemainder(dividingBy: 360)

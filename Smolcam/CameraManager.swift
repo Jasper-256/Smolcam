@@ -9,6 +9,7 @@ class CameraManager: NSObject, ObservableObject {
     @Published var capturedImage: UIImage?
     @Published var isFront = false
     @Published var bitsPerComponent = 4
+    @Published var deviceOrientation: UIImage.Orientation = .up
     
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
@@ -86,7 +87,9 @@ class CameraManager: NSObject, ObservableObject {
             let x = data.acceleration.x
             let y = data.acceleration.y
             guard max(abs(x), abs(y)) > 0.5 else { return }
-            self.lastOrientation = abs(y) > abs(x) ? (y < 0 ? .up : .down) : (x < 0 ? .left : .right)
+            let orientation: UIImage.Orientation = abs(y) > abs(x) ? (y < 0 ? .up : .down) : (x < 0 ? .left : .right)
+            self.lastOrientation = orientation
+            self.deviceOrientation = orientation
         }
     }
     
