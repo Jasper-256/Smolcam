@@ -2,6 +2,7 @@ import AVFoundation
 import UIKit
 import Combine
 import CoreMotion
+import Accelerate
 
 class CameraManager: NSObject, ObservableObject {
     @Published var previewImage: UIImage?
@@ -12,10 +13,18 @@ class CameraManager: NSObject, ObservableObject {
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "camera")
+    private let processQueue = DispatchQueue(label: "process", qos: .userInteractive)
     private let motionManager = CMMotionManager()
     private var shouldCapture = false
     private var captureOrientation: UIImage.Orientation = .up
     private var lastOrientation: UIImage.Orientation = .up
+    
+    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    private var isProcessing = false
+    
+    // Reusable buffers
+    private var pixelBuffer = [UInt8](repeating: 0, count: 480 * 640 * 4)
+    private var floatBuffer = [Float](repeating: 0, count: 480 * 640 * 4)
     
     override init() {
         super.init()
@@ -32,6 +41,7 @@ class CameraManager: NSObject, ObservableObject {
         if session.canAddInput(input) { session.addInput(input) }
         
         output.setSampleBufferDelegate(self, queue: queue)
+        output.alwaysDiscardsLateVideoFrames = true
         output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
         if session.canAddOutput(output) { session.addOutput(output) }
         
@@ -95,46 +105,41 @@ class CameraManager: NSObject, ObservableObject {
         shouldCapture = true
     }
     
-    private func process(_ image: UIImage, forSave: Bool = false) -> UIImage {
-        let size = CGSize(width: 480, height: 640)
-        UIGraphicsBeginImageContext(size)
-        image.draw(in: CGRect(origin: .zero, size: size))
-        let resized = UIGraphicsGetImageFromCurrentImageContext()!
-        UIGraphicsEndImageContext()
+    private func process(_ cgImage: CGImage, bits: Int, forSave: Bool = false) -> UIImage? {
+        let width = 480, height = 640
+        let bytesPerRow = width * 4
+        let totalBytes = height * bytesPerRow
         
-        guard let cgImage = resized.cgImage else { return resized }
-        
-        let width = cgImage.width
-        let height = cgImage.height
-        let bytesPerPixel = 4
-        let bytesPerRow = bytesPerPixel * width
-        
-        var pixelData = [UInt8](repeating: 0, count: height * bytesPerRow)
-        
+        // Draw directly into our reusable buffer
         guard let context = CGContext(
-            data: &pixelData,
+            data: &pixelBuffer,
             width: width,
             height: height,
             bitsPerComponent: 8,
             bytesPerRow: bytesPerRow,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return resized }
+        ) else { return nil }
         
+        context.interpolationQuality = .low
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         
-        let levels = 1 << bitsPerComponent
-        let divisor = 256 / levels
-        let maxLevel = levels - 1
+        // Quantize using Accelerate (SIMD)
+        let levels = Float(1 << bits)
+        let scale = 255.0 / (levels - 1)
+        let divisor = 256.0 / levels
         
-        for i in stride(from: 0, to: pixelData.count, by: 4) {
-            pixelData[i] = UInt8(Int(pixelData[i]) / divisor * 255 / maxLevel)
-            pixelData[i+1] = UInt8(Int(pixelData[i+1]) / divisor * 255 / maxLevel)
-            pixelData[i+2] = UInt8(Int(pixelData[i+2]) / divisor * 255 / maxLevel)
-        }
+        vDSP_vfltu8(pixelBuffer, 1, &floatBuffer, 1, vDSP_Length(totalBytes))
+        var div = divisor
+        vDSP_vsdiv(floatBuffer, 1, &div, &floatBuffer, 1, vDSP_Length(totalBytes))
+        var n = Int32(totalBytes)
+        vvfloorf(&floatBuffer, floatBuffer, &n)
+        var sc = scale
+        vDSP_vsmul(floatBuffer, 1, &sc, &floatBuffer, 1, vDSP_Length(totalBytes))
+        vDSP_vfixu8(floatBuffer, 1, &pixelBuffer, 1, vDSP_Length(totalBytes))
         
-        guard let outputContext = CGContext(
-            data: &pixelData,
+        guard let outContext = CGContext(
+            data: &pixelBuffer,
             width: width,
             height: height,
             bitsPerComponent: 8,
@@ -142,14 +147,10 @@ class CameraManager: NSObject, ObservableObject {
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ),
-        let outputImage = outputContext.makeImage() else { return resized }
+        let outputImage = outContext.makeImage() else { return nil }
         
         let result = UIImage(cgImage: outputImage)
-        
-        if forSave {
-            return rotateForSave(result)
-        }
-        return result
+        return forSave ? rotateForSave(result) : result
     }
     
     private func rotateForSave(_ image: UIImage) -> UIImage {
@@ -198,19 +199,41 @@ class CameraManager: NSObject, ObservableObject {
 
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let now = CACurrentMediaTime()
+        let capture = shouldCapture
         
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext()
-        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return }
-        let uiImage = UIImage(cgImage: cgImage)
+        // Skip if still processing previous frame (unless capturing)
+        guard capture || !isProcessing else { return }
+        isProcessing = true
         
-        DispatchQueue.main.async {
-            self.previewImage = self.process(uiImage)
+        guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            isProcessing = false
+            return
+        }
+        
+        let ciImage = CIImage(cvPixelBuffer: pb)
+        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
+            isProcessing = false
+            return
+        }
+        
+        let bits = bitsPerComponent
+        
+        processQueue.async { [weak self] in
+            guard let self else { return }
             
-            if self.shouldCapture {
+            let preview = self.process(cgImage, bits: bits, forSave: false)
+            var captured: UIImage?
+            
+            if capture {
                 self.shouldCapture = false
-                self.capturedImage = self.process(uiImage, forSave: true)
+                captured = self.process(cgImage, bits: bits, forSave: true)
+            }
+            
+            DispatchQueue.main.async {
+                self.previewImage = preview
+                if let img = captured { self.capturedImage = img }
+                self.isProcessing = false
             }
         }
     }
