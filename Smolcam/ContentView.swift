@@ -123,7 +123,7 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if let img = camera.capturedImage,
                let cgImage = img.cgImage,
-               let data = pngDataWithMetadata(cgImage, bits: camera.bitsPerComponent) {
+               let data = imageDataWithMetadata(cgImage, bits: camera.bitsPerComponent) {
                 PHPhotoLibrary.shared().performChanges {
                     let request = PHAssetCreationRequest.forAsset()
                     request.addResource(with: .photo, data: data, options: nil)
@@ -133,9 +133,10 @@ struct ContentView: View {
     }
 }
 
-private func pngDataWithMetadata(_ cgImage: CGImage, bits: Int) -> Data? {
+private func imageDataWithMetadata(_ cgImage: CGImage, bits: Int) -> Data? {
     let data = NSMutableData()
-    guard let dest = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+    let format = bits == 8 ? "public.heic" : "public.png"
+    guard let dest = CGImageDestinationCreateWithData(data, format as CFString, 1, nil) else { return nil }
     
     let metadata: [String: Any] = [
         kCGImagePropertyExifDictionary as String: [
