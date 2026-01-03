@@ -54,19 +54,32 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 30)
                 
-                HStack(spacing: 0) {
-                    ForEach(1...8, id: \.self) { n in
-                        Button { camera.bitsPerComponent = n } label: {
-                            Text("\(n)")
-                                .font(.system(size: 14, weight: camera.bitsPerComponent == n ? .bold : .regular))
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                                .background(camera.bitsPerComponent == n ? Color.white : Color.clear)
-                                .foregroundColor(camera.bitsPerComponent == n ? .black : .white)
+                HStack(spacing: 8) {
+                    HStack(spacing: 0) {
+                        ForEach(1...8, id: \.self) { n in
+                            Button { camera.bitsPerComponent = n } label: {
+                                Text("\(n)")
+                                    .font(.system(size: 14, weight: camera.bitsPerComponent == n ? .bold : .regular))
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .background(camera.bitsPerComponent == n ? Color.white : Color.clear)
+                                    .foregroundColor(camera.bitsPerComponent == n ? .black : .white)
+                            }
                         }
                     }
+                    .background(Color.white.opacity(0.2))
+                    .cornerRadius(8)
+                    
+                    Button { camera.ditherEnabled.toggle() } label: {
+                        Image(systemName: "circle.grid.3x3")
+                            .font(.system(size: 18))
+                            .frame(width: 44, height: 44)
+                            .background(camera.ditherEnabled && camera.bitsPerComponent < 8 ? Color.white : Color.white.opacity(0.2))
+                            .foregroundColor(camera.ditherEnabled && camera.bitsPerComponent < 8 ? .black : .white)
+                            .cornerRadius(8)
+                            .opacity(camera.bitsPerComponent < 8 ? 1 : 0.4)
+                    }
+                    .disabled(camera.bitsPerComponent >= 8)
                 }
-                .background(Color.white.opacity(0.2))
-                .cornerRadius(8)
                 .padding(.horizontal, 30)
                 
                 Text("\(1 << (camera.bitsPerComponent * 3)) colors")

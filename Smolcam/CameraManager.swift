@@ -2,7 +2,8 @@ import AVFoundation
 import UIKit
 import Combine
 import CoreMotion
-import Accelerate
+import Metal
+import MetalKit
 
 class CameraManager: NSObject, ObservableObject {
     @Published var previewImage: UIImage?
@@ -10,24 +11,43 @@ class CameraManager: NSObject, ObservableObject {
     @Published var isFront = false
     @Published var bitsPerComponent = 4
     @Published var deviceOrientation: UIImage.Orientation = .up
+    @Published var ditherEnabled = false
     
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "camera")
-    private let processQueue = DispatchQueue(label: "process", qos: .userInteractive)
     private let motionManager = CMMotionManager()
     private var shouldCapture = false
     private var captureOrientation: UIImage.Orientation = .up
     private var lastOrientation: UIImage.Orientation = .up
-    
-    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     private var isProcessing = false
     
-    // Reusable buffers
-    private var pixelBuffer = [UInt8](repeating: 0, count: 480 * 640 * 4)
-    private var floatBuffer = [Float](repeating: 0, count: 480 * 640 * 4)
+    // Metal
+    private let device: MTLDevice
+    private let commandQueue: MTLCommandQueue
+    private let pipelineState: MTLComputePipelineState
+    private let textureCache: CVMetalTextureCache
+    private var outTexture: MTLTexture?
     
     override init() {
+        // Setup Metal
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let commandQueue = device.makeCommandQueue(),
+              let library = device.makeDefaultLibrary(),
+              let kernel = library.makeFunction(name: "ditherQuantize"),
+              let pipelineState = try? device.makeComputePipelineState(function: kernel) else {
+            fatalError("Metal init failed")
+        }
+        
+        var cache: CVMetalTextureCache?
+        CVMetalTextureCacheCreate(nil, nil, device, nil, &cache)
+        guard let textureCache = cache else { fatalError("Texture cache failed") }
+        
+        self.device = device
+        self.commandQueue = commandQueue
+        self.pipelineState = pipelineState
+        self.textureCache = textureCache
+        
         super.init()
         setupSession()
         startMotionUpdates()
@@ -75,7 +95,6 @@ class CameraManager: NSObject, ObservableObject {
             }
             
             self.session.commitConfiguration()
-            
             DispatchQueue.main.async { self.isFront = !self.isFront }
         }
     }
@@ -84,8 +103,7 @@ class CameraManager: NSObject, ObservableObject {
         motionManager.accelerometerUpdateInterval = 0.1
         motionManager.startAccelerometerUpdates(to: .main) { [weak self] data, _ in
             guard let self, let data else { return }
-            let x = data.acceleration.x
-            let y = data.acceleration.y
+            let x = data.acceleration.x, y = data.acceleration.y
             guard max(abs(x), abs(y)) > 0.5 else { return }
             let orientation: UIImage.Orientation = abs(y) > abs(x) ? (y < 0 ? .up : .down) : (x < 0 ? .left : .right)
             self.lastOrientation = orientation
@@ -93,82 +111,84 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
     
-    private func currentOrientation() -> UIImage.Orientation { lastOrientation }
-    
-    func start() {
-        queue.async { self.session.startRunning() }
-    }
-    
-    func stop() {
-        queue.async { self.session.stopRunning() }
-    }
+    func start() { queue.async { self.session.startRunning() } }
+    func stop() { queue.async { self.session.stopRunning() } }
     
     func capture() {
-        captureOrientation = currentOrientation()
+        captureOrientation = lastOrientation
         shouldCapture = true
     }
     
-    private func process(_ cgImage: CGImage, bits: Int, forSave: Bool = false) -> UIImage? {
-        let width = 480, height = 640
+    private func process(_ pixelBuffer: CVPixelBuffer, bits: Int, dither: Bool, forSave: Bool) -> UIImage? {
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        
+        // Create input texture from pixel buffer
+        var cvTexture: CVMetalTexture?
+        CVMetalTextureCacheCreateTextureFromImage(nil, textureCache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
+        guard let cvTex = cvTexture, let inTexture = CVMetalTextureGetTexture(cvTex) else { return nil }
+        
+        // Create/reuse output texture
+        if outTexture == nil || outTexture!.width != width || outTexture!.height != height {
+            let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+            desc.usage = [.shaderRead, .shaderWrite]
+            outTexture = device.makeTexture(descriptor: desc)
+        }
+        guard let outTex = outTexture else { return nil }
+        
+        // Encode compute
+        guard let cmdBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = cmdBuffer.makeComputeCommandEncoder() else { return nil }
+        
+        var bitsVal = Int32(bits)
+        var ditherVal: Int32 = dither ? 1 : 0
+        
+        encoder.setComputePipelineState(pipelineState)
+        encoder.setTexture(inTexture, index: 0)
+        encoder.setTexture(outTex, index: 1)
+        encoder.setBytes(&bitsVal, length: MemoryLayout<Int32>.size, index: 0)
+        encoder.setBytes(&ditherVal, length: MemoryLayout<Int32>.size, index: 1)
+        
+        let threadGroupSize = MTLSize(width: 16, height: 16, depth: 1)
+        let threadGroups = MTLSize(
+            width: (width + 15) / 16,
+            height: (height + 15) / 16,
+            depth: 1
+        )
+        encoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupSize)
+        encoder.endEncoding()
+        
+        cmdBuffer.commit()
+        cmdBuffer.waitUntilCompleted()
+        
+        // Read back
         let bytesPerRow = width * 4
-        let totalBytes = height * bytesPerRow
+        var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+        outTex.getBytes(&pixels, bytesPerRow: bytesPerRow, from: MTLRegion(origin: .init(), size: .init(width: width, height: height, depth: 1)), mipmapLevel: 0)
         
-        // Draw directly into our reusable buffer
+        // Create CGImage (BGRA -> RGBA swap not needed for display, but fix byte order)
         guard let context = CGContext(
-            data: &pixelBuffer,
+            data: &pixels,
             width: width,
             height: height,
             bitsPerComponent: 8,
             bytesPerRow: bytesPerRow,
             space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+            bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        ), let cgImage = context.makeImage() else { return nil }
         
-        context.interpolationQuality = .low
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        // Quantize using Accelerate (SIMD)
-        let levels = Float(1 << bits)
-        let scale = 255.0 / (levels - 1)
-        let divisor = 256.0 / levels
-        
-        vDSP_vfltu8(pixelBuffer, 1, &floatBuffer, 1, vDSP_Length(totalBytes))
-        var div = divisor
-        vDSP_vsdiv(floatBuffer, 1, &div, &floatBuffer, 1, vDSP_Length(totalBytes))
-        var n = Int32(totalBytes)
-        vvfloorf(&floatBuffer, floatBuffer, &n)
-        var sc = scale
-        vDSP_vsmul(floatBuffer, 1, &sc, &floatBuffer, 1, vDSP_Length(totalBytes))
-        vDSP_vfixu8(floatBuffer, 1, &pixelBuffer, 1, vDSP_Length(totalBytes))
-        
-        guard let outContext = CGContext(
-            data: &pixelBuffer,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ),
-        let outputImage = outContext.makeImage() else { return nil }
-        
-        let result = UIImage(cgImage: outputImage)
+        let result = UIImage(cgImage: cgImage)
         return forSave ? rotateForSave(result) : result
     }
     
     private func rotateForSave(_ image: UIImage) -> UIImage {
-        guard let cgImage = image.cgImage else { return image }
+        guard let cgImage = image.cgImage, captureOrientation != .up else { return image }
         
-        let orientation = captureOrientation
-        if orientation == .up { return image }
-        
-        let width = cgImage.width
-        let height = cgImage.height
-        
+        let width = cgImage.width, height = cgImage.height
         var transform = CGAffineTransform.identity
         var newSize = CGSize(width: width, height: height)
         
-        switch orientation {
+        switch captureOrientation {
         case .down:
             transform = transform.translatedBy(x: CGFloat(width), y: CGFloat(height)).rotated(by: .pi)
         case .left:
@@ -177,24 +197,16 @@ class CameraManager: NSObject, ObservableObject {
         case .right:
             newSize = CGSize(width: height, height: width)
             transform = transform.translatedBy(x: 0, y: CGFloat(width)).rotated(by: -.pi / 2)
-        default:
-            return image
+        default: return image
         }
         
         guard let colorSpace = cgImage.colorSpace,
-              let ctx = CGContext(
-                data: nil,
-                width: Int(newSize.width),
-                height: Int(newSize.height),
-                bitsPerComponent: cgImage.bitsPerComponent,
-                bytesPerRow: 0,
-                space: colorSpace,
-                bitmapInfo: cgImage.bitmapInfo.rawValue
-              ) else { return image }
+              let ctx = CGContext(data: nil, width: Int(newSize.width), height: Int(newSize.height),
+                                  bitsPerComponent: cgImage.bitsPerComponent, bytesPerRow: 0,
+                                  space: colorSpace, bitmapInfo: cgImage.bitmapInfo.rawValue) else { return image }
         
         ctx.concatenate(transform)
         ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
         guard let rotated = ctx.makeImage() else { return image }
         return UIImage(cgImage: rotated)
     }
@@ -202,10 +214,7 @@ class CameraManager: NSObject, ObservableObject {
 
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        let now = CACurrentMediaTime()
         let capture = shouldCapture
-        
-        // Skip if still processing previous frame (unless capturing)
         guard capture || !isProcessing else { return }
         isProcessing = true
         
@@ -214,30 +223,21 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
             return
         }
         
-        let ciImage = CIImage(cvPixelBuffer: pb)
-        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
-            isProcessing = false
-            return
+        let bits = bitsPerComponent
+        let dither = ditherEnabled
+        
+        let preview = process(pb, bits: bits, dither: dither, forSave: false)
+        var captured: UIImage?
+        
+        if capture {
+            shouldCapture = false
+            captured = process(pb, bits: bits, dither: dither, forSave: true)
         }
         
-        let bits = bitsPerComponent
-        
-        processQueue.async { [weak self] in
-            guard let self else { return }
-            
-            let preview = self.process(cgImage, bits: bits, forSave: false)
-            var captured: UIImage?
-            
-            if capture {
-                self.shouldCapture = false
-                captured = self.process(cgImage, bits: bits, forSave: true)
-            }
-            
-            DispatchQueue.main.async {
-                self.previewImage = preview
-                if let img = captured { self.capturedImage = img }
-                self.isProcessing = false
-            }
+        DispatchQueue.main.async {
+            self.previewImage = preview
+            if let img = captured { self.capturedImage = img }
+            self.isProcessing = false
         }
     }
 }
