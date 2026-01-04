@@ -25,7 +25,7 @@ kernel void ditherQuantize(
     float levels = float(1 << bits);
     float scale = 1.0 / (levels - 1.0);
     
-    if (dither != 0 && bits < 8) {
+    if (dither != 0) {
         // Bayer 8x8 ordered dithering
         uint idx = (gid.y % 8) * 8 + (gid.x % 8);
         float threshold = (bayer8x8[idx] / 64.0 - 0.5) / levels;

@@ -16,7 +16,7 @@ struct ContentView: View {
                     if let preview = camera.previewImage {
                         Image(uiImage: preview)
                             .resizable()
-                            .interpolation(.none)
+                            .interpolation(.high)
                             .aspectRatio(contentMode: .fit)
                     }
                     
@@ -73,12 +73,10 @@ struct ContentView: View {
                         Image(systemName: "circle.grid.3x3")
                             .font(.system(size: 18))
                             .frame(width: 44, height: 44)
-                            .background(camera.ditherEnabled && camera.bitsPerComponent < 8 ? Color.white : Color.white.opacity(0.2))
-                            .foregroundColor(camera.ditherEnabled && camera.bitsPerComponent < 8 ? .black : .white)
+                            .background(camera.ditherEnabled ? Color.white : Color.white.opacity(0.2))
+                            .foregroundColor(camera.ditherEnabled ? .black : .white)
                             .cornerRadius(8)
-                            .opacity(camera.bitsPerComponent < 8 ? 1 : 0.4)
                     }
-                    .disabled(camera.bitsPerComponent >= 8)
                 }
                 .padding(.horizontal, 30)
                 
@@ -136,7 +134,7 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if let img = camera.capturedImage,
                let cgImage = img.cgImage,
-               let data = imageDataWithMetadata(cgImage, bits: camera.bitsPerComponent) {
+               let data = imageDataWithMetadata(cgImage, bits: camera.bitsPerComponent, dither: camera.ditherEnabled) {
                 PHPhotoLibrary.shared().performChanges {
                     let request = PHAssetCreationRequest.forAsset()
                     request.addResource(with: .photo, data: data, options: nil)
@@ -146,14 +144,15 @@ struct ContentView: View {
     }
 }
 
-private func imageDataWithMetadata(_ cgImage: CGImage, bits: Int) -> Data? {
+private func imageDataWithMetadata(_ cgImage: CGImage, bits: Int, dither: Bool) -> Data? {
     let data = NSMutableData()
-    let format = bits == 8 ? "public.heic" : "public.png"
+    let format = "public.png"
     guard let dest = CGImageDestinationCreateWithData(data, format as CFString, 1, nil) else { return nil }
     
+    let ditherStr = dither ? " dithered" : " quantized"
     let metadata: [String: Any] = [
         kCGImagePropertyExifDictionary as String: [
-            kCGImagePropertyExifLensModel as String: "Smolcam \(bits)-bit"
+            kCGImagePropertyExifLensModel as String: "Smolcam \(bits)-bit\(ditherStr)"
         ]
     ]
     

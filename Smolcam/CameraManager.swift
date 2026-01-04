@@ -11,7 +11,7 @@ class CameraManager: NSObject, ObservableObject {
     @Published var isFront = false
     @Published var bitsPerComponent = 4
     @Published var deviceOrientation: UIImage.Orientation = .up
-    @Published var ditherEnabled = false
+    @Published var ditherEnabled = true
     
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
