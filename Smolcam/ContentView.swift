@@ -29,21 +29,41 @@ struct ContentView: View {
     @StateObject private var camera = CameraManager()
     @State private var fadeOpacity = 0.0
     @State private var iconRotation = 0.0
+    @State private var baseZoom: CGFloat = 1.0
     
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             
             VStack(spacing: 20) {
-                ZStack {
+                ZStack(alignment: .bottom) {
                     MetalPreviewView(camera: camera)
                     
                     Color.black
                         .opacity(fadeOpacity)
                         .allowsHitTesting(false)
+                    
+                    if camera.displayZoom != 1.0 {
+                        Button(action: resetZoom) {
+                            Text(String(format: "%.1fx", floor(camera.displayZoom * 10) / 10))
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.black.opacity(0.5))
+                                .cornerRadius(12)
+                        }
+                        .padding(.bottom, 8)
+                        .transition(.opacity)
+                    }
                 }
                 .aspectRatio(480.0/640.0, contentMode: .fit)
                 .onTapGesture(count: 2) { flip() }
+                .gesture(
+                    MagnifyGesture()
+                        .onChanged { camera.setZoom(baseZoom * $0.magnification) }
+                        .onEnded { _ in baseZoom = camera.zoomLevel }
+                )
                 
                 ZStack {
                     Button(action: capture) {
@@ -105,14 +125,23 @@ struct ContentView: View {
             }
         }
         .statusBarHidden(true)
-        .onAppear { camera.start() }
+        .onAppear {
+            camera.start()
+            baseZoom = camera.baseZoomFactor
+        }
         .onDisappear { camera.stop() }
         .onChange(of: camera.deviceOrientation) { updateIconRotation() }
+        .onChange(of: camera.isFront) { baseZoom = camera.zoomLevel }
     }
     
     private func flip() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         camera.flipCamera()
+    }
+    
+    private func resetZoom() {
+        camera.animateZoom(to: camera.baseZoomFactor)
+        baseZoom = camera.baseZoomFactor
     }
     
     private func openPhotos() {

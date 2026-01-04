@@ -10,6 +10,13 @@ class CameraManager: NSObject, ObservableObject {
     @Published var bitsPerComponent = 4
     @Published var deviceOrientation: UIImage.Orientation = .up
     @Published var ditherEnabled = true
+    @Published var zoomLevel: CGFloat = 1.0
+    
+    private var currentDevice: AVCaptureDevice?
+    private(set) var baseZoomFactor: CGFloat = 1.0
+    
+    var displayZoom: CGFloat { zoomLevel / baseZoomFactor }
+    var minDisplayZoom: CGFloat { 1.0 / baseZoomFactor }
     
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
@@ -65,18 +72,26 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     private func setupSession() {
+        session.beginConfiguration()
         session.sessionPreset = .vga640x480
         
-        guard let camDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-              let input = try? AVCaptureDeviceInput(device: camDevice) else { return }
+        guard let camDevice = bestCamera(for: .back),
+              let input = try? AVCaptureDeviceInput(device: camDevice) else {
+            session.commitConfiguration()
+            return
+        }
         
-        // Lock frame duration for consistency
+        currentDevice = camDevice
+        baseZoomFactor = camDevice.virtualDeviceSwitchOverVideoZoomFactors.first?.doubleValue ?? 1.0
+        zoomLevel = baseZoomFactor
+        
+        if session.canAddInput(input) { session.addInput(input) }
+        
         try? camDevice.lockForConfiguration()
+        camDevice.videoZoomFactor = baseZoomFactor
         camDevice.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
         camDevice.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
         camDevice.unlockForConfiguration()
-        
-        if session.canAddInput(input) { session.addInput(input) }
         
         output.setSampleBufferDelegate(self, queue: queue)
         output.alwaysDiscardsLateVideoFrames = true
@@ -86,6 +101,39 @@ class CameraManager: NSObject, ObservableObject {
         if let connection = output.connection(with: .video) {
             connection.videoRotationAngle = 90
         }
+        
+        session.commitConfiguration()
+    }
+    
+    private func bestCamera(for position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        let types: [AVCaptureDevice.DeviceType] = position == .back
+            ? [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
+            : [.builtInWideAngleCamera]
+        return AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: position).devices.first
+    }
+    
+    private var maxZoomFactor: CGFloat {
+        guard let device = currentDevice else { return 1.0 }
+        let limit = isFront ? 5.0 * baseZoomFactor : 40.0 * baseZoomFactor
+        return min(device.maxAvailableVideoZoomFactor, limit)
+    }
+    
+    func setZoom(_ factor: CGFloat) {
+        guard let device = currentDevice else { return }
+        let clamped = max(device.minAvailableVideoZoomFactor, min(factor, maxZoomFactor))
+        try? device.lockForConfiguration()
+        device.videoZoomFactor = clamped
+        device.unlockForConfiguration()
+        DispatchQueue.main.async { self.zoomLevel = clamped }
+    }
+    
+    func animateZoom(to factor: CGFloat) {
+        guard let device = currentDevice else { return }
+        let clamped = max(device.minAvailableVideoZoomFactor, min(factor, maxZoomFactor))
+        try? device.lockForConfiguration()
+        device.ramp(toVideoZoomFactor: clamped, withRate: 8.0)
+        device.unlockForConfiguration()
+        DispatchQueue.main.async { self.zoomLevel = clamped }
     }
     
     func flipCamera() {
@@ -97,19 +145,24 @@ class CameraManager: NSObject, ObservableObject {
             }
             
             let newPosition: AVCaptureDevice.Position = self.isFront ? .back : .front
-            guard let camDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition),
+            guard let camDevice = self.bestCamera(for: newPosition),
                   let input = try? AVCaptureDeviceInput(device: camDevice),
                   self.session.canAddInput(input) else {
                 self.session.commitConfiguration()
                 return
             }
             
+            self.currentDevice = camDevice
+            let newBase = camDevice.virtualDeviceSwitchOverVideoZoomFactors.first?.doubleValue ?? 1.0
+            self.baseZoomFactor = newBase
+            
+            self.session.addInput(input)
+            
             try? camDevice.lockForConfiguration()
+            camDevice.videoZoomFactor = newBase
             camDevice.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
             camDevice.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
             camDevice.unlockForConfiguration()
-            
-            self.session.addInput(input)
             
             if let connection = self.output.connection(with: .video) {
                 connection.videoRotationAngle = 90
@@ -117,7 +170,10 @@ class CameraManager: NSObject, ObservableObject {
             }
             
             self.session.commitConfiguration()
-            DispatchQueue.main.async { self.isFront = !self.isFront }
+            DispatchQueue.main.async {
+                self.isFront = !self.isFront
+                self.zoomLevel = newBase
+            }
         }
     }
     
