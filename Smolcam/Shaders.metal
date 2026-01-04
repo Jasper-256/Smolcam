@@ -1,6 +1,26 @@
 #include <metal_stdlib>
 using namespace metal;
 
+struct VertexOut {
+    float4 position [[position]];
+    float2 texCoord;
+};
+
+vertex VertexOut vertexPassthrough(uint vid [[vertex_id]]) {
+    const float2 positions[4] = { {-1,-1}, {1,-1}, {-1,1}, {1,1} };
+    const float2 texCoords[4] = { {0,1}, {1,1}, {0,0}, {1,0} };
+    VertexOut out;
+    out.position = float4(positions[vid], 0, 1);
+    out.texCoord = texCoords[vid];
+    return out;
+}
+
+fragment float4 fragmentPassthrough(VertexOut in [[stage_in]],
+                                    texture2d<float> tex [[texture(0)]]) {
+    constexpr sampler s(filter::linear);
+    return tex.sample(s, in.texCoord);
+}
+
 constant float bayer16x16[256] = {
       0,128, 32,160,  8,136, 40,168,  2,130, 34,162, 10,138, 42,170,
     192, 64,224, 96,200, 72,232,104,194, 66,226, 98,202, 74,234,106,

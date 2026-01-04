@@ -6,7 +6,6 @@ import Metal
 import MetalKit
 
 class CameraManager: NSObject, ObservableObject {
-    @Published var previewImage: UIImage?
     @Published var capturedImage: UIImage?
     @Published var isFront = false
     @Published var bitsPerComponent = 4
@@ -20,23 +19,37 @@ class CameraManager: NSObject, ObservableObject {
     private var shouldCapture = false
     private var captureOrientation: UIImage.Orientation = .up
     private var lastOrientation: UIImage.Orientation = .up
-    private var isProcessing = false
     
     // Metal
-    private let device: MTLDevice
+    let device: MTLDevice
     private let commandQueue: MTLCommandQueue
-    private let pipelineState: MTLComputePipelineState
+    private let computePipeline: MTLComputePipelineState
+    private let renderPipeline: MTLRenderPipelineState
     private let textureCache: CVMetalTextureCache
-    private var outTexture: MTLTexture?
+    private var processedTexture: MTLTexture?
+    
+    // For MTKView rendering
+    weak var metalView: MTKView?
+    private var currentTexture: MTLTexture?
+    private let textureLock = NSLock()
     
     override init() {
-        // Setup Metal
         guard let device = MTLCreateSystemDefaultDevice(),
               let commandQueue = device.makeCommandQueue(),
               let library = device.makeDefaultLibrary(),
-              let kernel = library.makeFunction(name: "ditherQuantize"),
-              let pipelineState = try? device.makeComputePipelineState(function: kernel) else {
+              let computeKernel = library.makeFunction(name: "ditherQuantize"),
+              let computePipeline = try? device.makeComputePipelineState(function: computeKernel),
+              let vertexFunc = library.makeFunction(name: "vertexPassthrough"),
+              let fragFunc = library.makeFunction(name: "fragmentPassthrough") else {
             fatalError("Metal init failed")
+        }
+        
+        let renderDesc = MTLRenderPipelineDescriptor()
+        renderDesc.vertexFunction = vertexFunc
+        renderDesc.fragmentFunction = fragFunc
+        renderDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        guard let renderPipeline = try? device.makeRenderPipelineState(descriptor: renderDesc) else {
+            fatalError("Render pipeline failed")
         }
         
         var cache: CVMetalTextureCache?
@@ -45,7 +58,8 @@ class CameraManager: NSObject, ObservableObject {
         
         self.device = device
         self.commandQueue = commandQueue
-        self.pipelineState = pipelineState
+        self.computePipeline = computePipeline
+        self.renderPipeline = renderPipeline
         self.textureCache = textureCache
         
         super.init()
@@ -56,8 +70,14 @@ class CameraManager: NSObject, ObservableObject {
     private func setupSession() {
         session.sessionPreset = .vga640x480
         
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-              let input = try? AVCaptureDeviceInput(device: device) else { return }
+        guard let camDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+              let input = try? AVCaptureDeviceInput(device: camDevice) else { return }
+        
+        // Lock frame duration for consistency
+        try? camDevice.lockForConfiguration()
+        camDevice.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
+        camDevice.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
+        camDevice.unlockForConfiguration()
         
         if session.canAddInput(input) { session.addInput(input) }
         
@@ -80,12 +100,17 @@ class CameraManager: NSObject, ObservableObject {
             }
             
             let newPosition: AVCaptureDevice.Position = self.isFront ? .back : .front
-            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition),
-                  let input = try? AVCaptureDeviceInput(device: device),
+            guard let camDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition),
+                  let input = try? AVCaptureDeviceInput(device: camDevice),
                   self.session.canAddInput(input) else {
                 self.session.commitConfiguration()
                 return
             }
+            
+            try? camDevice.lockForConfiguration()
+            camDevice.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
+            camDevice.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
+            camDevice.unlockForConfiguration()
             
             self.session.addInput(input)
             
@@ -119,66 +144,58 @@ class CameraManager: NSObject, ObservableObject {
         shouldCapture = true
     }
     
-    private func process(_ pixelBuffer: CVPixelBuffer, bits: Int, dither: Bool, forSave: Bool) -> UIImage? {
+    private func processToTexture(_ pixelBuffer: CVPixelBuffer, bits: Int, dither: Bool) -> MTLTexture? {
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         
-        // Create input texture from pixel buffer
         var cvTexture: CVMetalTexture?
         CVMetalTextureCacheCreateTextureFromImage(nil, textureCache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
         guard let cvTex = cvTexture, let inTexture = CVMetalTextureGetTexture(cvTex) else { return nil }
         
-        // Create/reuse output texture
-        if outTexture == nil || outTexture!.width != width || outTexture!.height != height {
+        if processedTexture == nil || processedTexture!.width != width || processedTexture!.height != height {
             let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
             desc.usage = [.shaderRead, .shaderWrite]
-            outTexture = device.makeTexture(descriptor: desc)
+            processedTexture = device.makeTexture(descriptor: desc)
         }
-        guard let outTex = outTexture else { return nil }
+        guard let outTex = processedTexture else { return nil }
         
-        // Encode compute
         guard let cmdBuffer = commandQueue.makeCommandBuffer(),
               let encoder = cmdBuffer.makeComputeCommandEncoder() else { return nil }
         
         var bitsVal = Int32(bits)
         var ditherVal: Int32 = dither ? 1 : 0
         
-        encoder.setComputePipelineState(pipelineState)
+        encoder.setComputePipelineState(computePipeline)
         encoder.setTexture(inTexture, index: 0)
         encoder.setTexture(outTex, index: 1)
-        encoder.setBytes(&bitsVal, length: MemoryLayout<Int32>.size, index: 0)
-        encoder.setBytes(&ditherVal, length: MemoryLayout<Int32>.size, index: 1)
+        encoder.setBytes(&bitsVal, length: 4, index: 0)
+        encoder.setBytes(&ditherVal, length: 4, index: 1)
         
-        let threadGroupSize = MTLSize(width: 16, height: 16, depth: 1)
-        let threadGroups = MTLSize(
-            width: (width + 15) / 16,
-            height: (height + 15) / 16,
-            depth: 1
-        )
-        encoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupSize)
+        let tgSize = MTLSize(width: 16, height: 16, depth: 1)
+        let tgCount = MTLSize(width: (width + 15) / 16, height: (height + 15) / 16, depth: 1)
+        encoder.dispatchThreadgroups(tgCount, threadsPerThreadgroup: tgSize)
         encoder.endEncoding()
         
         cmdBuffer.commit()
         cmdBuffer.waitUntilCompleted()
         
-        // Read back
+        return outTex
+    }
+    
+    private func textureToImage(_ texture: MTLTexture) -> UIImage? {
+        let width = texture.width, height = texture.height
         let bytesPerRow = width * 4
         var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
-        outTex.getBytes(&pixels, bytesPerRow: bytesPerRow, from: MTLRegion(origin: .init(), size: .init(width: width, height: height, depth: 1)), mipmapLevel: 0)
+        texture.getBytes(&pixels, bytesPerRow: bytesPerRow, from: MTLRegion(origin: .init(), size: .init(width: width, height: height, depth: 1)), mipmapLevel: 0)
         
-        // Create CGImage (BGRA -> RGBA swap not needed for display, but fix byte order)
         guard let context = CGContext(
-            data: &pixels,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
+            data: &pixels, width: width, height: height,
+            bitsPerComponent: 8, bytesPerRow: bytesPerRow,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
         ), let cgImage = context.makeImage() else { return nil }
         
-        let result = UIImage(cgImage: cgImage)
-        return forSave ? rotateForSave(result) : result
+        return rotateForSave(UIImage(cgImage: cgImage))
     }
     
     private func rotateForSave(_ image: UIImage) -> UIImage {
@@ -210,34 +227,61 @@ class CameraManager: NSObject, ObservableObject {
         guard let rotated = ctx.makeImage() else { return image }
         return UIImage(cgImage: rotated)
     }
+    
+}
+
+extension CameraManager: MTKViewDelegate {
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    
+    func draw(in view: MTKView) {
+        textureLock.lock()
+        let tex = currentTexture
+        textureLock.unlock()
+        
+        guard let texture = tex,
+              let drawable = view.currentDrawable,
+              let cmdBuffer = commandQueue.makeCommandBuffer() else { return }
+        
+        let passDesc = MTLRenderPassDescriptor()
+        passDesc.colorAttachments[0].texture = drawable.texture
+        passDesc.colorAttachments[0].loadAction = .clear
+        passDesc.colorAttachments[0].storeAction = .store
+        passDesc.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        
+        guard let encoder = cmdBuffer.makeRenderCommandEncoder(descriptor: passDesc) else { return }
+        encoder.setRenderPipelineState(renderPipeline)
+        encoder.setFragmentTexture(texture, index: 0)
+        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        encoder.endEncoding()
+        
+        cmdBuffer.present(drawable)
+        cmdBuffer.commit()
+    }
 }
 
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        let capture = shouldCapture
-        guard capture || !isProcessing else { return }
-        isProcessing = true
-        
-        guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            isProcessing = false
-            return
-        }
+        guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
         let bits = bitsPerComponent
         let dither = ditherEnabled
+        let capture = shouldCapture
         
-        let preview = process(pb, bits: bits, dither: dither, forSave: false)
-        var captured: UIImage?
+        guard let texture = processToTexture(pb, bits: bits, dither: dither) else { return }
+        
+        textureLock.lock()
+        currentTexture = texture
+        textureLock.unlock()
+        
+        DispatchQueue.main.async {
+            self.metalView?.draw()
+        }
         
         if capture {
             shouldCapture = false
-            captured = process(pb, bits: bits, dither: dither, forSave: true)
-        }
-        
-        DispatchQueue.main.async {
-            self.previewImage = preview
-            if let img = captured { self.capturedImage = img }
-            self.isProcessing = false
+            if let img = textureToImage(texture) {
+                DispatchQueue.main.async { self.capturedImage = img }
+            }
         }
     }
 }

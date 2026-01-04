@@ -1,6 +1,26 @@
 import SwiftUI
 import Photos
 import ImageIO
+import MetalKit
+
+struct MetalPreviewView: UIViewRepresentable {
+    let camera: CameraManager
+    
+    func makeUIView(context: Context) -> MTKView {
+        let view = MTKView(frame: .zero, device: camera.device)
+        view.delegate = camera
+        view.isPaused = true
+        view.enableSetNeedsDisplay = false
+        view.framebufferOnly = true
+        view.colorPixelFormat = .bgra8Unorm
+        view.contentMode = .scaleAspectFit
+        view.backgroundColor = .black
+        camera.metalView = view
+        return view
+    }
+    
+    func updateUIView(_ view: MTKView, context: Context) {}
+}
 
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
@@ -13,12 +33,7 @@ struct ContentView: View {
             
             VStack(spacing: 20) {
                 ZStack {
-                    if let preview = camera.previewImage {
-                        Image(uiImage: preview)
-                            .resizable()
-                            .interpolation(.high)
-                            .aspectRatio(contentMode: .fit)
-                    }
+                    MetalPreviewView(camera: camera)
                     
                     Color.black
                         .opacity(fadeOpacity)
