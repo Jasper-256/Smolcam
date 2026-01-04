@@ -1,7 +1,6 @@
 import AVFoundation
 import UIKit
 import Combine
-import CoreMotion
 import Metal
 import MetalKit
 
@@ -15,10 +14,8 @@ class CameraManager: NSObject, ObservableObject {
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "camera")
-    private let motionManager = CMMotionManager()
     private var shouldCapture = false
     private var captureOrientation: UIImage.Orientation = .up
-    private var lastOrientation: UIImage.Orientation = .up
     
     // Metal
     let device: MTLDevice
@@ -64,7 +61,7 @@ class CameraManager: NSObject, ObservableObject {
         
         super.init()
         setupSession()
-        startMotionUpdates()
+        startOrientationUpdates()
     }
     
     private func setupSession() {
@@ -124,15 +121,17 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
     
-    private func startMotionUpdates() {
-        motionManager.accelerometerUpdateInterval = 0.1
-        motionManager.startAccelerometerUpdates(to: .main) { [weak self] data, _ in
-            guard let self, let data else { return }
-            let x = data.acceleration.x, y = data.acceleration.y
-            guard max(abs(x), abs(y)) > 0.5 else { return }
-            let orientation: UIImage.Orientation = abs(y) > abs(x) ? (y < 0 ? .up : .down) : (x < 0 ? .left : .right)
-            self.lastOrientation = orientation
-            self.deviceOrientation = orientation
+    private func startOrientationUpdates() {
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        NotificationCenter.default.addObserver(forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            switch UIDevice.current.orientation {
+            case .portrait: self.deviceOrientation = .up
+            case .portraitUpsideDown: self.deviceOrientation = .down
+            case .landscapeLeft: self.deviceOrientation = .left
+            case .landscapeRight: self.deviceOrientation = .right
+            default: break
+            }
         }
     }
     
@@ -140,7 +139,7 @@ class CameraManager: NSObject, ObservableObject {
     func stop() { queue.async { self.session.stopRunning() } }
     
     func capture() {
-        captureOrientation = lastOrientation
+        captureOrientation = deviceOrientation
         shouldCapture = true
     }
     

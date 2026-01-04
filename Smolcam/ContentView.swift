@@ -28,7 +28,7 @@ struct MetalPreviewView: UIViewRepresentable {
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
     @State private var fadeOpacity = 0.0
-    @State private var iconRotation: Double = 0
+    @State private var iconRotation = 0.0
     
     var body: some View {
         ZStack {
@@ -123,16 +123,18 @@ struct ContentView: View {
     
     private func updateIconRotation() {
         let target: Double = switch camera.deviceOrientation {
-        case .left: 90
-        case .right: -90
-        case .down: 180
-        default: 0
+            case .left: 90
+            case .right: -90
+            case .down: 180
+            default: 0
         }
         var delta = target - iconRotation.truncatingRemainder(dividingBy: 360)
         if delta > 180 { delta -= 360 }
         if delta < -180 { delta += 360 }
-        let duration = abs(delta) > 135 ? 0.4 : 0.3
-        withAnimation(.easeInOut(duration: duration)) { iconRotation += delta }
+        if delta == -180 { delta = 180 }
+        withAnimation(.easeInOut(duration: abs(delta) > 135 ? 0.4 : 0.3)) {
+            iconRotation += delta
+        }
     }
     
     private func capture() {
