@@ -7,13 +7,14 @@ import MetalKit
 class CameraManager: NSObject, ObservableObject {
     @Published var capturedImage: UIImage?
     @Published var isFront = false
-    @Published var bitsPerComponent = 4
+    @Published var bitsPerComponent = 2
     @Published var deviceOrientation: UIImage.Orientation = .up
     @Published var ditherEnabled = true
     @Published var zoomLevel: CGFloat = 1.0
     
     private var currentDevice: AVCaptureDevice?
     private(set) var baseZoomFactor: CGFloat = 1.0
+    private var backCameraMaxOpticalZoom: CGFloat = 1.0
     
     var displayZoom: CGFloat { zoomLevel / baseZoomFactor }
     var minDisplayZoom: CGFloat { 1.0 / baseZoomFactor }
@@ -83,6 +84,7 @@ class CameraManager: NSObject, ObservableObject {
         
         currentDevice = camDevice
         baseZoomFactor = camDevice.virtualDeviceSwitchOverVideoZoomFactors.first?.doubleValue ?? 1.0
+        backCameraMaxOpticalZoom = camDevice.virtualDeviceSwitchOverVideoZoomFactors.last?.doubleValue ?? 1.0
         zoomLevel = baseZoomFactor
         
         if session.canAddInput(input) { session.addInput(input) }
@@ -114,7 +116,7 @@ class CameraManager: NSObject, ObservableObject {
     
     private var maxZoomFactor: CGFloat {
         guard let device = currentDevice else { return 1.0 }
-        let limit = isFront ? 5.0 * baseZoomFactor : 40.0 * baseZoomFactor
+        let limit = isFront ? 10.0 : 10.0 * backCameraMaxOpticalZoom
         return min(device.maxAvailableVideoZoomFactor, limit)
     }
     

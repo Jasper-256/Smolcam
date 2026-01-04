@@ -46,12 +46,11 @@ struct ContentView: View {
                     
                     if camera.displayZoom != 1.0 {
                         Text(String(format: "%.1fx", floor(camera.displayZoom * 10) / 10))
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(.black.opacity(0.5))
-                            .cornerRadius(12)
+                            .frame(width: 35, height: 35)
+                            .background(Circle().fill(.black.opacity(0.5)))
+                            .rotationEffect(.degrees(iconRotation))
                             .padding(.bottom, 8)
                             .onTapGesture(perform: resetZoom)
                             .transition(.opacity)
