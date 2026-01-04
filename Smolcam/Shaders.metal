@@ -50,16 +50,15 @@ kernel void ditherQuantize(
     if (gid.x >= inTex.get_width() || gid.y >= inTex.get_height()) return;
     
     float4 color = inTex.read(gid);
-    float levels = float(1 << bits);
-    float scale = 1.0 / (levels - 1.0);
+    float maxLevel = float((1 << bits) - 1);
     
     if (dither != 0) {
         // Bayer 16x16 ordered dithering
         uint idx = (gid.y % 16) * 16 + (gid.x % 16);
-        float threshold = (bayer16x16[idx] / 256.0 - 0.5) / levels;
-        color.rgb = floor((color.rgb + threshold) * levels) * scale;
+        float threshold = bayer16x16[idx] / 256.0 - 0.5;
+        color.rgb = floor(color.rgb * maxLevel + 0.5 + threshold) / maxLevel;
     } else {
-        color.rgb = floor(color.rgb * levels) * scale;
+        color.rgb = floor(color.rgb * maxLevel + 0.5) / maxLevel;
     }
     
     outTex.write(float4(saturate(color.rgb), color.a), gid);
