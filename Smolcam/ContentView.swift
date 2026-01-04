@@ -30,6 +30,7 @@ struct ContentView: View {
     @State private var fadeOpacity = 0.0
     @State private var iconRotation = 0.0
     @State private var baseZoom: CGFloat = 1.0
+    @State private var lastMag: CGFloat = 0
     
     var body: some View {
         ZStack {
@@ -44,25 +45,37 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                     
                     if camera.displayZoom != 1.0 {
-                        Button(action: resetZoom) {
-                            Text(String(format: "%.1fx", floor(camera.displayZoom * 10) / 10))
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.black.opacity(0.5))
-                                .cornerRadius(12)
-                        }
-                        .padding(.bottom, 8)
-                        .transition(.opacity)
+                        Text(String(format: "%.1fx", floor(camera.displayZoom * 10) / 10))
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.5))
+                            .cornerRadius(12)
+                            .padding(.bottom, 8)
+                            .onTapGesture(perform: resetZoom)
+                            .transition(.opacity)
                     }
                 }
                 .aspectRatio(480.0/640.0, contentMode: .fit)
-                .onTapGesture(count: 2) { flip() }
+                .simultaneousGesture(TapGesture(count: 2).onEnded { flip() })
                 .gesture(
-                    MagnifyGesture()
-                        .onChanged { camera.setZoom(baseZoom * $0.magnification) }
-                        .onEnded { _ in baseZoom = camera.zoomLevel }
+                    MagnifyGesture(minimumScaleDelta: 0)
+                        .onChanged { value in
+                            if lastMag == 0 {
+                                lastMag = value.magnification
+                                return
+                            }
+                            let deltaMag = value.magnification / lastMag
+                            let relZoom = camera.zoomLevel / camera.baseZoomFactor
+                            let speed = max(0.3, 1.5 + 1.0 * log(relZoom))
+                            camera.setZoom(camera.zoomLevel * pow(deltaMag, speed))
+                            lastMag = value.magnification
+                        }
+                        .onEnded { _ in
+                            baseZoom = camera.zoomLevel
+                            lastMag = 0
+                        }
                 )
                 
                 ZStack {
