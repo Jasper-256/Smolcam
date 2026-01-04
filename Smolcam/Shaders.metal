@@ -21,6 +21,15 @@ fragment float4 fragmentPassthrough(VertexOut in [[stage_in]],
     return tex.sample(s, in.texCoord);
 }
 
+// sRGB <-> linear conversions
+inline float3 srgbToLinear(float3 c) {
+    return select(c / 12.92, pow((c + 0.055) / 1.055, 2.4), c > 0.04045);
+}
+
+inline float3 linearToSrgb(float3 c) {
+    return select(c * 12.92, 1.055 * pow(c, 1.0/2.4) - 0.055, c > 0.0031308);
+}
+
 constant float bayer16x16[256] = {
       0,128, 32,160,  8,136, 40,168,  2,130, 34,162, 10,138, 42,170,
     192, 64,224, 96,200, 72,232,104,194, 66,226, 98,202, 74,234,106,
@@ -53,10 +62,23 @@ kernel void ditherQuantize(
     float maxLevel = float((1 << bits) - 1);
     
     if (dither != 0) {
-        // Bayer 16x16 ordered dithering
+        float3 linear = srgbToLinear(color.rgb);
         uint idx = (gid.y % 16) * 16 + (gid.x % 16);
-        float threshold = bayer16x16[idx] / 256.0 - 0.5;
-        color.rgb = floor(color.rgb * maxLevel + 0.5 + threshold) / maxLevel;
+        float threshold = bayer16x16[idx] / 256.0;
+        
+        // Find adjacent sRGB palette levels
+        float3 k_lo = floor(color.rgb * maxLevel);
+        float3 k_hi = min(k_lo + 1.0, maxLevel);
+        
+        // Convert palette levels to linear space
+        float3 L_lo = srgbToLinear(k_lo / maxLevel);
+        float3 L_hi = srgbToLinear(k_hi / maxLevel);
+        
+        // Find position within interval (0-1) in linear space
+        float3 t = (linear - L_lo) / max(L_hi - L_lo, 0.0001);
+        
+        // Dither decision: pick high if position exceeds threshold
+        color.rgb = select(k_lo, k_hi, t > threshold) / maxLevel;
     } else {
         color.rgb = floor(color.rgb * maxLevel + 0.5) / maxLevel;
     }
