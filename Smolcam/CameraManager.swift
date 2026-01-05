@@ -12,8 +12,8 @@ class CameraManager: NSObject, ObservableObject {
     @Published var ditherEnabled = true
     @Published var zoomLevel: CGFloat = 1.0
     
-    var backgroundWidth = 3
-    var backgroundHeight = 4
+    var backgroundWidth = 6
+    var backgroundHeight = 8
     var backgroundSnapshot: UIImage?
     
     private var currentDevice: AVCaptureDevice?
