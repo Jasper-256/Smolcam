@@ -27,6 +27,7 @@ struct MetalPreviewView: UIViewRepresentable {
 
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var fadeOpacity = 0.0
     @State private var iconRotation = 0.0
     @State private var baseZoom: CGFloat = 1.0
@@ -39,6 +40,12 @@ struct ContentView: View {
             VStack(spacing: 20) {
                 ZStack(alignment: .bottom) {
                     MetalPreviewView(camera: camera)
+                    
+                    if scenePhase == .background, let snapshot = camera.backgroundSnapshot {
+                        Image(uiImage: snapshot)
+                            .interpolation(.none)
+                            .resizable()
+                    }
                     
                     Color.black
                         .opacity(fadeOpacity)

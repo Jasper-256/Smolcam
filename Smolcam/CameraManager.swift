@@ -12,6 +12,10 @@ class CameraManager: NSObject, ObservableObject {
     @Published var ditherEnabled = true
     @Published var zoomLevel: CGFloat = 1.0
     
+    var backgroundWidth = 3
+    var backgroundHeight = 4
+    var backgroundSnapshot: UIImage?
+    
     private var currentDevice: AVCaptureDevice?
     private(set) var baseZoomFactor: CGFloat = 1.0
     private var backCameraMaxOpticalZoom: CGFloat = 1.0
@@ -29,6 +33,7 @@ class CameraManager: NSObject, ObservableObject {
     let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let computePipeline: MTLComputePipelineState
+    private let downsamplePipeline: MTLComputePipelineState
     private let renderPipeline: MTLRenderPipelineState
     private let textureCache: CVMetalTextureCache
     private var processedTexture: MTLTexture?
@@ -44,6 +49,8 @@ class CameraManager: NSObject, ObservableObject {
               let library = device.makeDefaultLibrary(),
               let computeKernel = library.makeFunction(name: "ditherQuantize"),
               let computePipeline = try? device.makeComputePipelineState(function: computeKernel),
+              let downsampleKernel = library.makeFunction(name: "downsampleQuantize"),
+              let downsamplePipeline = try? device.makeComputePipelineState(function: downsampleKernel),
               let vertexFunc = library.makeFunction(name: "vertexPassthrough"),
               let fragFunc = library.makeFunction(name: "fragmentPassthrough") else {
             fatalError("Metal init failed")
@@ -64,6 +71,7 @@ class CameraManager: NSObject, ObservableObject {
         self.device = device
         self.commandQueue = commandQueue
         self.computePipeline = computePipeline
+        self.downsamplePipeline = downsamplePipeline
         self.renderPipeline = renderPipeline
         self.textureCache = textureCache
         
@@ -259,6 +267,17 @@ class CameraManager: NSObject, ObservableObject {
         return rotateForSave(UIImage(cgImage: cgImage))
     }
     
+    private func smallTextureToImage(_ texture: MTLTexture) -> UIImage? {
+        let w = texture.width, h = texture.height
+        var pixels = [UInt8](repeating: 0, count: h * w * 4)
+        texture.getBytes(&pixels, bytesPerRow: w * 4, from: MTLRegion(origin: .init(), size: .init(width: w, height: h, depth: 1)), mipmapLevel: 0)
+        guard let ctx = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue),
+        let cgImage = ctx.makeImage() else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+    
     private func rotateForSave(_ image: UIImage) -> UIImage {
         guard let cgImage = image.cgImage, captureOrientation != .up else { return image }
         
@@ -329,6 +348,25 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         let capture = shouldCapture
         
         guard let texture = processToTexture(pb, bits: bits, dither: dither) else { return }
+        
+        // Update background snapshot
+        let w = backgroundWidth, h = backgroundHeight
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+        desc.usage = [.shaderRead, .shaderWrite]
+        if let dst = device.makeTexture(descriptor: desc),
+            let cmdBuffer = commandQueue.makeCommandBuffer(),
+            let encoder = cmdBuffer.makeComputeCommandEncoder() {
+            var b = Int32(bits)
+            encoder.setComputePipelineState(downsamplePipeline)
+            encoder.setTexture(texture, index: 0)
+            encoder.setTexture(dst, index: 1)
+            encoder.setBytes(&b, length: 4, index: 0)
+            encoder.dispatchThreads(MTLSize(width: w, height: h, depth: 1), threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1))
+            encoder.endEncoding()
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            backgroundSnapshot = smallTextureToImage(dst)
+        }
         
         textureLock.lock()
         currentTexture = texture

@@ -85,3 +85,27 @@ kernel void ditherQuantize(
     
     outTex.write(float4(saturate(color.rgb), color.a), gid);
 }
+
+kernel void downsampleQuantize(
+    texture2d<float, access::read> inTex [[texture(0)]],
+    texture2d<float, access::write> outTex [[texture(1)]],
+    constant int &bits [[buffer(0)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    uint outW = outTex.get_width(), outH = outTex.get_height();
+    if (gid.x >= outW || gid.y >= outH) return;
+    
+    uint inW = inTex.get_width(), inH = inTex.get_height();
+    uint x0 = (gid.x * inW) / outW, x1 = ((gid.x + 1) * inW) / outW;
+    uint y0 = (gid.y * inH) / outH, y1 = ((gid.y + 1) * inH) / outH;
+    
+    float3 sum = float3(0);
+    for (uint y = y0; y < y1; y++)
+        for (uint x = x0; x < x1; x++)
+            sum += srgbToLinear(inTex.read(uint2(x, y)).rgb);
+    
+    float3 avg = linearToSrgb(sum / float((x1 - x0) * (y1 - y0)));
+    float maxLevel = float((1 << bits) - 1);
+    float3 quantized = floor(avg * maxLevel + 0.5) / maxLevel;
+    outTex.write(float4(quantized, 1.0), gid);
+}
