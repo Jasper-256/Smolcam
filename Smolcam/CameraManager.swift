@@ -181,15 +181,19 @@ class CameraManager: NSObject, ObservableObject {
     
     private func startOrientationUpdates() {
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        updateOrientationFromDevice()
         NotificationCenter.default.addObserver(forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            switch UIDevice.current.orientation {
-            case .portrait: self.deviceOrientation = .up
-            case .portraitUpsideDown: self.deviceOrientation = .down
-            case .landscapeLeft: self.deviceOrientation = .left
-            case .landscapeRight: self.deviceOrientation = .right
+            self?.updateOrientationFromDevice()
+        }
+    }
+    
+    private func updateOrientationFromDevice() {
+        switch UIDevice.current.orientation {
+            case .portrait: deviceOrientation = .up
+            case .portraitUpsideDown: deviceOrientation = .down
+            case .landscapeLeft: deviceOrientation = .left
+            case .landscapeRight: deviceOrientation = .right
             default: break
-            }
         }
     }
     

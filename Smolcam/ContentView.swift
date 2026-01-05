@@ -140,6 +140,7 @@ struct ContentView: View {
         .onAppear {
             camera.start()
             baseZoom = camera.baseZoomFactor
+            updateIconRotation(animated: false)
         }
         .onDisappear { camera.stop() }
         .onChange(of: camera.deviceOrientation) { updateIconRotation() }
@@ -162,7 +163,8 @@ struct ContentView: View {
         }
     }
     
-    private func updateIconRotation() {
+    private func updateIconRotation(animated: Bool = true) {
+        guard UIDevice.current.userInterfaceIdiom != .pad else { return }
         let target: Double = switch camera.deviceOrientation {
             case .left: 90
             case .right: -90
@@ -173,7 +175,11 @@ struct ContentView: View {
         if delta > 180 { delta -= 360 }
         if delta < -180 { delta += 360 }
         if delta == -180 { delta = 180 }
-        withAnimation(.easeInOut(duration: abs(delta) > 135 ? 0.4 : 0.3)) {
+        if animated {
+            withAnimation(.easeInOut(duration: abs(delta) > 135 ? 0.4 : 0.3)) {
+                iconRotation += delta
+            }
+        } else {
             iconRotation += delta
         }
     }

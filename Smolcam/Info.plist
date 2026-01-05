@@ -4,5 +4,10 @@
 <dict>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchScreenBackground</string>
+	</dict>
 </dict>
 </plist>
