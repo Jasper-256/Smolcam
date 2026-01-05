@@ -116,7 +116,7 @@ class CameraManager: NSObject, ObservableObject {
     
     private var maxZoomFactor: CGFloat {
         guard let device = currentDevice else { return 1.0 }
-        let limit = isFront ? 10.0 : 10.0 * backCameraMaxOpticalZoom
+        let limit = isFront ? 5.0 : 5.0 * backCameraMaxOpticalZoom
         return min(device.maxAvailableVideoZoomFactor, limit)
     }
     

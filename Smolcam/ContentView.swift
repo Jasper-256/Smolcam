@@ -67,7 +67,7 @@ struct ContentView: View {
                             }
                             let deltaMag = value.magnification / lastMag
                             let relZoom = camera.zoomLevel / camera.baseZoomFactor
-                            let speed = max(0.3, 1.5 + 1.0 * log(relZoom))
+                            let speed = max(1.5, 1.0 + 1.442695 * log(relZoom))
                             camera.setZoom(camera.zoomLevel * pow(deltaMag, speed))
                             lastMag = value.magnification
                         }
