@@ -51,7 +51,7 @@ struct ContentView: View {
                             .frame(width: 35, height: 35)
                             .background(Circle().fill(.black.opacity(0.5)))
                             .rotationEffect(.degrees(iconRotation))
-                            .padding(.bottom, 8)
+                            .padding(.bottom, 10)
                             .onTapGesture(perform: resetZoom)
                             .transition(.opacity)
                     }
@@ -87,7 +87,7 @@ struct ContentView: View {
                     HStack {
                         Button { openPhotos() } label: {
                             Image(systemName: "photo")
-                                .font(.system(size: 24))
+                                .font(.system(size: 25))
                                 .foregroundColor(.white)
                                 .rotationEffect(.degrees(iconRotation))
                                 .frame(width: 70, height: 70)
@@ -102,7 +102,7 @@ struct ContentView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 30)
+                .padding(.horizontal, 20)
                 
                 HStack(spacing: 8) {
                     HStack(spacing: 0) {
@@ -123,17 +123,17 @@ struct ContentView: View {
                         Image(systemName: "circle.grid.3x3")
                             .font(.system(size: 18))
                             .frame(width: 44, height: 44)
-                            .background(camera.ditherEnabled ? Color.white : Color.white.opacity(0.2))
+                            .background(camera.ditherEnabled ? Color.white : Color.clear)
                             .foregroundColor(camera.ditherEnabled ? .black : .white)
-                            .cornerRadius(8)
                     }
+                    .background(Color.white.opacity(0.2))
+                    .cornerRadius(8)
                 }
-                .padding(.horizontal, 30)
+                .padding(.horizontal, 20)
                 
                 Text("\(1 << (camera.bitsPerComponent * 3)) colors")
                     .foregroundColor(.gray)
                     .font(.system(size: 14))
-                    .padding(.bottom, 30)
             }
         }
         .statusBarHidden(true)
