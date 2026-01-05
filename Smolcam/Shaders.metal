@@ -16,18 +16,9 @@ vertex VertexOut vertexPassthrough(uint vid [[vertex_id]]) {
 }
 
 fragment float4 fragmentPassthrough(VertexOut in [[stage_in]],
-                                    texture2d<float> tex [[texture(0)]]) {
+        texture2d<float> tex [[texture(0)]]) {
     constexpr sampler s(filter::linear);
     return tex.sample(s, in.texCoord);
-}
-
-// sRGB <-> linear conversions
-inline float3 srgbToLinear(float3 c) {
-    return select(c / 12.92, pow((c + 0.055) / 1.055, 2.4), c > 0.04045);
-}
-
-inline float3 linearToSrgb(float3 c) {
-    return select(c * 12.92, 1.055 * pow(c, 1.0/2.4) - 0.055, c > 0.0031308);
 }
 
 constant float bayer16x16[256] = {
@@ -62,23 +53,9 @@ kernel void ditherQuantize(
     float maxLevel = float((1 << bits) - 1);
     
     if (dither != 0) {
-        float3 linear = srgbToLinear(color.rgb);
         uint idx = (gid.y % 16) * 16 + (gid.x % 16);
         float threshold = bayer16x16[idx] / 256.0;
-        
-        // Find adjacent sRGB palette levels
-        float3 k_lo = floor(color.rgb * maxLevel);
-        float3 k_hi = min(k_lo + 1.0, maxLevel);
-        
-        // Convert palette levels to linear space
-        float3 L_lo = srgbToLinear(k_lo / maxLevel);
-        float3 L_hi = srgbToLinear(k_hi / maxLevel);
-        
-        // Find position within interval (0-1) in linear space
-        float3 t = (linear - L_lo) / max(L_hi - L_lo, 0.0001);
-        
-        // Dither decision: pick high if position exceeds threshold
-        color.rgb = select(k_lo, k_hi, t > threshold) / maxLevel;
+        color.rgb = floor(color.rgb * maxLevel + threshold * 0.9) / maxLevel;
     } else {
         color.rgb = floor(color.rgb * maxLevel + 0.5) / maxLevel;
     }
@@ -102,10 +79,14 @@ kernel void downsampleQuantize(
     float3 sum = float3(0);
     for (uint y = y0; y < y1; y++)
         for (uint x = x0; x < x1; x++)
-            sum += srgbToLinear(inTex.read(uint2(x, y)).rgb);
+            sum += inTex.read(uint2(x, y)).rgb;
     
-    float3 avg = linearToSrgb(sum / float((x1 - x0) * (y1 - y0)));
+    float3 avg = sum / float((x1 - x0) * (y1 - y0));
     float maxLevel = float((1 << bits) - 1);
-    float3 quantized = floor(avg * maxLevel + 0.5) / maxLevel;
+    
+    uint idx = (gid.y % 16) * 16 + (gid.x % 16);
+    float threshold = bayer16x16[idx] / 256.0;
+    float3 quantized = floor(avg * maxLevel + threshold) / maxLevel;
+
     outTex.write(float4(quantized, 1.0), gid);
 }

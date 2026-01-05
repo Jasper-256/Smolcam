@@ -13,11 +13,9 @@ struct MetalPreviewView: UIViewRepresentable {
         view.enableSetNeedsDisplay = false
         view.framebufferOnly = true
         view.colorPixelFormat = .bgra8Unorm
-        view.autoResizeDrawable = false
-        view.drawableSize = CGSize(width: 480, height: 640)
+        view.autoResizeDrawable = true
         view.contentMode = .scaleAspectFit
         view.backgroundColor = .black
-        view.layer.magnificationFilter = .trilinear
         camera.metalView = view
         return view
     }
