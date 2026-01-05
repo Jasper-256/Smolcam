@@ -125,7 +125,8 @@ struct ContentView: View {
                     .cornerRadius(8)
                     
                     Button { camera.ditherEnabled.toggle() } label: {
-                        Image(systemName: "circle.grid.3x3")
+                        Image(systemName: "checkerboard.rectangle")
+                            .rotationEffect(.degrees(90))
                             .font(.system(size: 18))
                             .frame(width: 44, height: 44)
                             .background(camera.ditherEnabled ? Color.white : Color.clear)
