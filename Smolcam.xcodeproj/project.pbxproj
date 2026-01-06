@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		837A0AD82F0C4CD200E6393C /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 837A0AD72F0C4CD200E6393C /* WidgetKit.framework */; };
+		837A0ADA2F0C4CD200E6393C /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 837A0AD92F0C4CD200E6393C /* SwiftUI.framework */; };
+		837A0AE72F0C4CD300E6393C /* SmolcamWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 837A0AD52F0C4CD200E6393C /* SmolcamWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		831A38232F031690006D7ED2 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,12 +27,36 @@
 			remoteGlobalIDString = 831A38102F03168E006D7ED2;
 			remoteInfo = Smolcam;
 		};
+		837A0AE52F0C4CD300E6393C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 831A38092F03168E006D7ED2 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 837A0AD42F0C4CD200E6393C;
+			remoteInfo = SmolcamWidgetExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		837A0AE82F0C4CD300E6393C /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				837A0AE72F0C4CD300E6393C /* SmolcamWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		831A38112F03168E006D7ED2 /* Smolcam.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Smolcam.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		831A38222F031690006D7ED2 /* SmolcamTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SmolcamTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		831A382C2F031690006D7ED2 /* SmolcamUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SmolcamUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		837A0AD52F0C4CD200E6393C /* SmolcamWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SmolcamWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		837A0AD72F0C4CD200E6393C /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		837A0AD92F0C4CD200E6393C /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -37,6 +67,20 @@
 			);
 			target = 831A38102F03168E006D7ED2 /* Smolcam */;
 		};
+		837A0AEC2F0C4CD300E6393C /* Exceptions for "SmolcamWidget" folder in "SmolcamWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 837A0AD42F0C4CD200E6393C /* SmolcamWidgetExtension */;
+		};
+		837A0AF02F0C557600E6393C /* Exceptions for "Smolcam" folder in "SmolcamWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				LaunchSmolcamIntent.swift,
+			);
+			target = 837A0AD42F0C4CD200E6393C /* SmolcamWidgetExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -44,6 +88,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				831A38342F031690006D7ED2 /* Exceptions for "Smolcam" folder in "Smolcam" target */,
+				837A0AF02F0C557600E6393C /* Exceptions for "Smolcam" folder in "SmolcamWidgetExtension" target */,
 			);
 			path = Smolcam;
 			sourceTree = "<group>";
@@ -56,6 +101,14 @@
 		831A382F2F031690006D7ED2 /* SmolcamUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = SmolcamUITests;
+			sourceTree = "<group>";
+		};
+		837A0ADB2F0C4CD200E6393C /* SmolcamWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				837A0AEC2F0C4CD300E6393C /* Exceptions for "SmolcamWidget" folder in "SmolcamWidgetExtension" target */,
+			);
+			path = SmolcamWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -82,6 +135,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		837A0AD22F0C4CD200E6393C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				837A0ADA2F0C4CD200E6393C /* SwiftUI.framework in Frameworks */,
+				837A0AD82F0C4CD200E6393C /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -91,6 +153,8 @@
 				831A38132F03168E006D7ED2 /* Smolcam */,
 				831A38252F031690006D7ED2 /* SmolcamTests */,
 				831A382F2F031690006D7ED2 /* SmolcamUITests */,
+				837A0ADB2F0C4CD200E6393C /* SmolcamWidget */,
+				837A0AD62F0C4CD200E6393C /* Frameworks */,
 				831A38122F03168E006D7ED2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -101,8 +165,18 @@
 				831A38112F03168E006D7ED2 /* Smolcam.app */,
 				831A38222F031690006D7ED2 /* SmolcamTests.xctest */,
 				831A382C2F031690006D7ED2 /* SmolcamUITests.xctest */,
+				837A0AD52F0C4CD200E6393C /* SmolcamWidgetExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		837A0AD62F0C4CD200E6393C /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				837A0AD72F0C4CD200E6393C /* WidgetKit.framework */,
+				837A0AD92F0C4CD200E6393C /* SwiftUI.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -115,10 +189,12 @@
 				831A380D2F03168E006D7ED2 /* Sources */,
 				831A380E2F03168E006D7ED2 /* Frameworks */,
 				831A380F2F03168E006D7ED2 /* Resources */,
+				837A0AE82F0C4CD300E6393C /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				837A0AE62F0C4CD300E6393C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				831A38132F03168E006D7ED2 /* Smolcam */,
@@ -176,6 +252,28 @@
 			productReference = 831A382C2F031690006D7ED2 /* SmolcamUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		837A0AD42F0C4CD200E6393C /* SmolcamWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 837A0AEB2F0C4CD300E6393C /* Build configuration list for PBXNativeTarget "SmolcamWidgetExtension" */;
+			buildPhases = (
+				837A0AD12F0C4CD200E6393C /* Sources */,
+				837A0AD22F0C4CD200E6393C /* Frameworks */,
+				837A0AD32F0C4CD200E6393C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				837A0ADB2F0C4CD200E6393C /* SmolcamWidget */,
+			);
+			name = SmolcamWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = SmolcamWidgetExtension;
+			productReference = 837A0AD52F0C4CD200E6393C /* SmolcamWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -197,6 +295,9 @@
 						CreatedOnToolsVersion = 26.2;
 						TestTargetID = 831A38102F03168E006D7ED2;
 					};
+					837A0AD42F0C4CD200E6393C = {
+						CreatedOnToolsVersion = 26.2;
+					};
 				};
 			};
 			buildConfigurationList = 831A380C2F03168E006D7ED2 /* Build configuration list for PBXProject "Smolcam" */;
@@ -216,6 +317,7 @@
 				831A38102F03168E006D7ED2 /* Smolcam */,
 				831A38212F031690006D7ED2 /* SmolcamTests */,
 				831A382B2F031690006D7ED2 /* SmolcamUITests */,
+				837A0AD42F0C4CD200E6393C /* SmolcamWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -236,6 +338,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		831A382A2F031690006D7ED2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		837A0AD32F0C4CD200E6393C /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -266,6 +375,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		837A0AD12F0C4CD200E6393C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -278,6 +394,11 @@
 			isa = PBXTargetDependency;
 			target = 831A38102F03168E006D7ED2 /* Smolcam */;
 			targetProxy = 831A382D2F031690006D7ED2 /* PBXContainerItemProxy */;
+		};
+		837A0AE62F0C4CD300E6393C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 837A0AD42F0C4CD200E6393C /* SmolcamWidgetExtension */;
+			targetProxy = 837A0AE52F0C4CD300E6393C /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -559,6 +680,66 @@
 			};
 			name = Release;
 		};
+		837A0AE92F0C4CD300E6393C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3XH8DM68EA;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SmolcamWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SmolcamWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jasper.Smolcam.SmolcamWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		837A0AEA2F0C4CD300E6393C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3XH8DM68EA;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SmolcamWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SmolcamWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jasper.Smolcam.SmolcamWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -594,6 +775,15 @@
 			buildConfigurations = (
 				831A383E2F031690006D7ED2 /* Debug */,
 				831A383F2F031690006D7ED2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		837A0AEB2F0C4CD300E6393C /* Build configuration list for PBXNativeTarget "SmolcamWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				837A0AE92F0C4CD300E6393C /* Debug */,
+				837A0AEA2F0C4CD300E6393C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
