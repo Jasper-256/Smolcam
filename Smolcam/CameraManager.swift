@@ -4,9 +4,11 @@ import Combine
 import Metal
 import MetalKit
 
+let isMac = ProcessInfo.processInfo.isiOSAppOnMac
+
 class CameraManager: NSObject, ObservableObject {
     @Published var capturedImage: UIImage?
-    @Published var isFront = false
+    @Published var isFront = isMac
     @Published var bitsPerComponent = 2
     @Published var deviceOrientation: UIImage.Orientation = .up
     @Published var ditherEnabled = true
@@ -85,7 +87,8 @@ class CameraManager: NSObject, ObservableObject {
         session.beginConfiguration()
         session.sessionPreset = .vga640x480
         
-        guard let camDevice = bestCamera(for: .back),
+        let position: AVCaptureDevice.Position = isFront ? .front : .back
+        guard let camDevice = bestCamera(for: position),
               let input = try? AVCaptureDeviceInput(device: camDevice) else {
             session.commitConfiguration()
             return
@@ -111,6 +114,7 @@ class CameraManager: NSObject, ObservableObject {
         
         if let connection = output.connection(with: .video) {
             connection.videoRotationAngle = 90
+            connection.isVideoMirrored = isFront
         }
         
         session.commitConfiguration()

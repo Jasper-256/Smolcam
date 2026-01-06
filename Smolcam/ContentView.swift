@@ -62,7 +62,9 @@ struct ContentView: View {
                     }
                 }
                 .aspectRatio(480.0/640.0, contentMode: .fit)
-                .simultaneousGesture(TapGesture(count: 2).onEnded { flip() })
+                .simultaneousGesture(TapGesture(count: 2).onEnded {
+                    if !isMac { flip() }
+                })
                 .gesture(
                     MagnifyGesture(minimumScaleDelta: 0)
                         .onChanged { value in
@@ -89,21 +91,23 @@ struct ContentView: View {
                             .frame(width: 70, height: 70)
                     }
                     
-                    HStack {
-                        Button { openPhotos() } label: {
-                            Image(systemName: "photo")
-                                .font(.system(size: 25))
-                                .foregroundColor(.white)
-                                .rotationEffect(.degrees(iconRotation))
-                                .frame(width: 70, height: 70)
-                        }
-                        Spacer()
-                        Button(action: flip) {
-                            Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
-                                .font(.system(size: 28))
-                                .foregroundColor(.white)
-                                .rotationEffect(.degrees(iconRotation))
-                                .frame(width: 70, height: 70)
+                    if !isMac {
+                        HStack {
+                            Button { openPhotos() } label: {
+                                Image(systemName: "photo")
+                                    .font(.system(size: 25))
+                                    .foregroundColor(.white)
+                                    .rotationEffect(.degrees(iconRotation))
+                                    .frame(width: 70, height: 70)
+                            }
+                            Spacer()
+                            Button(action: flip) {
+                                Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
+                                    .font(.system(size: 28))
+                                    .foregroundColor(.white)
+                                    .rotationEffect(.degrees(iconRotation))
+                                    .frame(width: 70, height: 70)
+                            }
                         }
                     }
                 }
@@ -140,6 +144,7 @@ struct ContentView: View {
                 Text("\(1 << (camera.bitsPerComponent * 3)) colors")
                     .foregroundColor(.gray)
                     .font(.system(size: 14))
+                    .padding(.bottom, UIDevice.current.userInterfaceIdiom != .phone ? 20 : 0)
             }
         }
         .statusBarHidden(true)
