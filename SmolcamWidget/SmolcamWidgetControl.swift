@@ -15,7 +15,7 @@ struct SmolcamWidgetControl: ControlWidget {
             kind: "com.jasper.Smolcam.SmolcamWidget"
         ) {
             ControlWidgetButton(action: LaunchSmolcamIntent()) {
-                Label("Open Smolcam", systemImage: "camera.fill")
+                Label("Open Smolcam", systemImage: "camera.viewfinder")
             }
         }
         .displayName("Open Smolcam")

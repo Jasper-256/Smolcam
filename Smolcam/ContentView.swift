@@ -114,7 +114,7 @@ struct ContentView: View {
                         ForEach(1...8, id: \.self) { n in
                             Button { camera.bitsPerComponent = n } label: {
                                 Text("\(n)")
-                                    .font(.system(size: 14, weight: camera.bitsPerComponent == n ? .bold : .regular))
+                                    .font(.system(size: 16, weight: camera.bitsPerComponent == n ? .bold : .regular))
                                     .frame(maxWidth: .infinity, minHeight: 44)
                                     .background(camera.bitsPerComponent == n ? Color.white : Color.clear)
                                     .foregroundColor(camera.bitsPerComponent == n ? .black : .white)
@@ -127,7 +127,7 @@ struct ContentView: View {
                     Button { camera.ditherEnabled.toggle() } label: {
                         Image(systemName: "checkerboard.rectangle")
                             .rotationEffect(.degrees(90))
-                            .font(.system(size: 18))
+                            .font(.system(size: 16))
                             .frame(width: 44, height: 44)
                             .background(camera.ditherEnabled ? Color.white : Color.clear)
                             .foregroundColor(camera.ditherEnabled ? .black : .white)
