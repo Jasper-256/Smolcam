@@ -28,6 +28,7 @@ class CameraManager: NSObject, ObservableObject {
     private let queue = DispatchQueue(label: "camera")
     private var shouldCapture = false
     private var captureOrientation: UIImage.Orientation = .up
+    private var captureIsFront = false
     
     // Metal
     let device: MTLDevice
@@ -210,6 +211,7 @@ class CameraManager: NSObject, ObservableObject {
     
     func capture() {
         captureOrientation = deviceOrientation
+        captureIsFront = isFront
         shouldCapture = true
     }
     
@@ -279,7 +281,8 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     private func rotateForSave(_ image: UIImage) -> UIImage {
-        guard let cgImage = image.cgImage, captureOrientation != .up else { return image }
+        guard let cgImage = image.cgImage else { return image }
+        if captureOrientation == .up && !captureIsFront { return image }
         
         let width = cgImage.width, height = cgImage.height
         var transform = CGAffineTransform.identity
@@ -294,7 +297,12 @@ class CameraManager: NSObject, ObservableObject {
         case .right:
             newSize = CGSize(width: height, height: width)
             transform = transform.translatedBy(x: 0, y: CGFloat(width)).rotated(by: -.pi / 2)
-        default: return image
+        default: break
+        }
+        
+        if captureIsFront {
+            transform = transform.translatedBy(x: captureOrientation == .left || captureOrientation == .right ? 0 : CGFloat(width), y: captureOrientation == .left || captureOrientation == .right ? CGFloat(height) : 0)
+            transform = transform.scaledBy(x: captureOrientation == .left || captureOrientation == .right ? 1 : -1, y: captureOrientation == .left || captureOrientation == .right ? -1 : 1)
         }
         
         guard let colorSpace = cgImage.colorSpace,
