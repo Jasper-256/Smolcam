@@ -49,7 +49,7 @@ struct ContentView: View {
                         .opacity(fadeOpacity)
                         .allowsHitTesting(false)
                     
-                    if camera.displayZoom != 1.0 {
+                    if camera.displayZoom < 1.0 || camera.displayZoom > 1.02 {
                         Text(String(format: "%.1fx", floor(camera.displayZoom * 10) / 10))
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.white)
