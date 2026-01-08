@@ -113,7 +113,7 @@ class CameraManager: NSObject, ObservableObject {
         if session.canAddOutput(output) { session.addOutput(output) }
         
         if let connection = output.connection(with: .video) {
-            connection.videoRotationAngle = 90
+            connection.videoOrientation = .portrait
             connection.isVideoMirrored = isFront
         }
         
@@ -180,7 +180,7 @@ class CameraManager: NSObject, ObservableObject {
             camDevice.unlockForConfiguration()
             
             if let connection = self.output.connection(with: .video) {
-                connection.videoRotationAngle = 90
+                connection.videoOrientation = .portrait
                 connection.isVideoMirrored = newPosition == .front
             }
             

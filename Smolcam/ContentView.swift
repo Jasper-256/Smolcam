@@ -65,24 +65,7 @@ struct ContentView: View {
                 .simultaneousGesture(TapGesture(count: 2).onEnded {
                     if !isMac { flip() }
                 })
-                .gesture(
-                    MagnifyGesture(minimumScaleDelta: 0)
-                        .onChanged { value in
-                            if lastMag == 0 {
-                                lastMag = value.magnification
-                                return
-                            }
-                            let deltaMag = value.magnification / lastMag
-                            let relZoom = camera.zoomLevel / camera.baseZoomFactor
-                            let speed = max(1.5, 1.0 + 1.442695 * log(relZoom))
-                            camera.setZoom(camera.zoomLevel * pow(deltaMag, speed))
-                            lastMag = value.magnification
-                        }
-                        .onEnded { _ in
-                            baseZoom = camera.zoomLevel
-                            lastMag = 0
-                        }
-                )
+                .gesture(magnificationGesture)
                 
                 ZStack {
                     Button(action: capture) {
@@ -102,7 +85,7 @@ struct ContentView: View {
                             }
                             Spacer()
                             Button(action: flip) {
-                                Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
+                                Image(systemName: "arrow.triangle.2.circlepath")
                                     .font(.system(size: 28))
                                     .foregroundColor(.white)
                                     .rotationEffect(.degrees(iconRotation))
@@ -154,8 +137,45 @@ struct ContentView: View {
             updateIconRotation(animated: false)
         }
         .onDisappear { camera.stop() }
-        .onChange(of: camera.deviceOrientation) { updateIconRotation() }
-        .onChange(of: camera.isFront) { baseZoom = camera.zoomLevel }
+        .onChange(of: camera.deviceOrientation) { _ in updateIconRotation() }
+        .onChange(of: camera.isFront) { _ in baseZoom = camera.zoomLevel }
+    }
+    
+    private var magnificationGesture: some Gesture {
+        if #available(iOS 17.0, *) {
+            return MagnifyGesture(minimumScaleDelta: 0)
+                .onChanged { value in
+                    handleMagnificationChange(value.magnification)
+                }
+                .onEnded { _ in
+                    handleMagnificationEnd()
+                }
+        } else {
+            return MagnificationGesture(minimumScaleDelta: 0)
+                .onChanged { value in
+                    handleMagnificationChange(value)
+                }
+                .onEnded { _ in
+                    handleMagnificationEnd()
+                }
+        }
+    }
+    
+    private func handleMagnificationChange(_ magnification: CGFloat) {
+        if lastMag == 0 {
+            lastMag = magnification
+            return
+        }
+        let deltaMag = magnification / lastMag
+        let relZoom = camera.zoomLevel / camera.baseZoomFactor
+        let speed = max(1.5, 1.0 + 1.442695 * log(relZoom))
+        camera.setZoom(camera.zoomLevel * pow(deltaMag, speed))
+        lastMag = magnification
+    }
+    
+    private func handleMagnificationEnd() {
+        baseZoom = camera.zoomLevel
+        lastMag = 0
     }
     
     private func flip() {
