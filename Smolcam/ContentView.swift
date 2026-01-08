@@ -30,6 +30,8 @@ struct ContentView: View {
     @State private var iconRotation = 0.0
     @State private var baseZoom: CGFloat = 1.0
     @State private var lastMag: CGFloat = 0
+    @State private var pendingSaveBits: Int?
+    @State private var pendingSaveDither: Bool?
     
     var body: some View {
         ZStack {
@@ -139,6 +141,21 @@ struct ContentView: View {
         .onDisappear { camera.stop() }
         .onChange(of: camera.deviceOrientation) { _ in updateIconRotation() }
         .onChange(of: camera.isFront) { _ in baseZoom = camera.zoomLevel }
+        .onChange(of: camera.capturedImage) { newImage in
+            guard let img = newImage,
+                  let cgImage = img.cgImage,
+                  let bits = pendingSaveBits,
+                  let dither = pendingSaveDither,
+                  let data = imageDataWithMetadata(cgImage, bits: bits, dither: dither) else { return }
+            pendingSaveBits = nil
+            pendingSaveDither = nil
+            Task {
+                try? await PHPhotoLibrary.shared().performChanges {
+                    let request = PHAssetCreationRequest.forAsset()
+                    request.addResource(with: .photo, data: data, options: nil)
+                }
+            }
+        }
     }
     
     private var magnificationGesture: some Gesture {
@@ -217,6 +234,8 @@ struct ContentView: View {
     
     private func capture() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        pendingSaveBits = camera.bitsPerComponent
+        pendingSaveDither = camera.ditherEnabled
         camera.capture()
         
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -226,17 +245,6 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             withAnimation(.easeInOut(duration: 0.2)) {
                 fadeOpacity = 0.0
-            }
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if let img = camera.capturedImage,
-               let cgImage = img.cgImage,
-               let data = imageDataWithMetadata(cgImage, bits: camera.bitsPerComponent, dither: camera.ditherEnabled) {
-                PHPhotoLibrary.shared().performChanges {
-                    let request = PHAssetCreationRequest.forAsset()
-                    request.addResource(with: .photo, data: data, options: nil)
-                }
             }
         }
     }
