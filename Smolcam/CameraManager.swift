@@ -95,7 +95,7 @@ class CameraManager: NSObject, ObservableObject {
         }
         
         currentDevice = camDevice
-        baseZoomFactor = camDevice.virtualDeviceSwitchOverVideoZoomFactors.first?.doubleValue ?? 1.0
+        baseZoomFactor = calculateBaseZoomFactor(for: camDevice)
         backCameraMaxOpticalZoom = camDevice.virtualDeviceSwitchOverVideoZoomFactors.last?.doubleValue ?? 1.0
         zoomLevel = baseZoomFactor
         
@@ -125,6 +125,23 @@ class CameraManager: NSObject, ObservableObject {
             ? [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
             : [.builtInWideAngleCamera]
         return AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: position).devices.first
+    }
+    
+    private func hasUltraWideCamera(_ device: AVCaptureDevice) -> Bool {
+        switch device.deviceType {
+        case .builtInTripleCamera, .builtInDualWideCamera:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    private func calculateBaseZoomFactor(for device: AVCaptureDevice) -> CGFloat {
+        if hasUltraWideCamera(device) {
+            return device.virtualDeviceSwitchOverVideoZoomFactors.first?.doubleValue ?? 1.0
+        } else {
+            return 1.0
+        }
     }
     
     private var maxZoomFactor: CGFloat {
@@ -168,7 +185,7 @@ class CameraManager: NSObject, ObservableObject {
             }
             
             self.currentDevice = camDevice
-            let newBase = camDevice.virtualDeviceSwitchOverVideoZoomFactors.first?.doubleValue ?? 1.0
+            let newBase = self.calculateBaseZoomFactor(for: camDevice)
             self.baseZoomFactor = newBase
             
             self.session.addInput(input)
