@@ -5,6 +5,11 @@ import Metal
 import MetalKit
 
 let isMac = ProcessInfo.processInfo.isiOSAppOnMac
+let hasHomeButton: Bool = {
+    guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+          let window = scene.windows.first else { return false }
+    return window.safeAreaInsets.bottom == 0
+}()
 
 class CameraManager: NSObject, ObservableObject {
     @Published var capturedImage: UIImage?

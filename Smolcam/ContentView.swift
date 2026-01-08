@@ -129,7 +129,7 @@ struct ContentView: View {
                 Text("\(1 << (camera.bitsPerComponent * 3)) colors")
                     .foregroundColor(.gray)
                     .font(.system(size: 14))
-                    .padding(.bottom, UIDevice.current.userInterfaceIdiom != .phone ? 20 : 0)
+                    .padding(.bottom, (UIDevice.current.userInterfaceIdiom != .phone || hasHomeButton) ? 20 : 0)
             }
         }
         .statusBarHidden(true)
