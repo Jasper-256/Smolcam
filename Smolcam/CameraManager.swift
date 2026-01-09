@@ -14,7 +14,7 @@ let hasHomeButton: Bool = {
 class CameraManager: NSObject, ObservableObject {
     @Published var capturedImage: UIImage?
     @Published var isFront = isMac
-    @Published var bitsPerComponent = 2
+    @Published var bitsPerPixel = 8
     @Published var deviceOrientation: UIImage.Orientation = .up
     @Published var ditherEnabled = true
     @Published var zoomLevel: CGFloat = 1.0
@@ -377,7 +377,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
-        let bits = bitsPerComponent
+        let bits = bitsPerPixel
         let dither = ditherEnabled
         let capture = shouldCapture
         

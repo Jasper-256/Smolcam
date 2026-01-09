@@ -3,6 +3,17 @@ import Photos
 import ImageIO
 import MetalKit
 
+private let colorFormatNames: [Int: String] = [
+    8: "RGB332",
+    16: "RGB565"
+]
+
+private func colorFormatName(_ bitsPerPixel: Int) -> String {
+    if let name = colorFormatNames[bitsPerPixel] { return name }
+    let b = bitsPerPixel / 3
+    return "RGB\(b)\(b)\(b)"
+}
+
 struct MetalPreviewView: UIViewRepresentable {
     let camera: CameraManager
     
@@ -30,7 +41,7 @@ struct ContentView: View {
     @State private var iconRotation = 0.0
     @State private var baseZoom: CGFloat = 1.0
     @State private var lastMag: CGFloat = 0
-    @State private var pendingSaveBits: Int?
+    @State private var pendingSavePixelBits: Int?
     @State private var pendingSaveDither: Bool?
     
     var body: some View {
@@ -100,13 +111,13 @@ struct ContentView: View {
                 
                 HStack(spacing: 8) {
                     HStack(spacing: 0) {
-                        ForEach(1...8, id: \.self) { n in
-                            Button { camera.bitsPerComponent = n } label: {
+                        ForEach([3, 6, 8, 12, 16, 24], id: \.self) { n in
+                            Button { camera.bitsPerPixel = n } label: {
                                 Text("\(n)")
-                                    .font(.system(size: 16, weight: camera.bitsPerComponent == n ? .bold : .regular))
+                                    .font(.system(size: 16, weight: camera.bitsPerPixel == n ? .bold : .regular))
                                     .frame(maxWidth: .infinity, minHeight: 44)
-                                    .background(camera.bitsPerComponent == n ? Color.white : Color.clear)
-                                    .foregroundColor(camera.bitsPerComponent == n ? .black : .white)
+                                    .background(camera.bitsPerPixel == n ? Color.white : Color.clear)
+                                    .foregroundColor(camera.bitsPerPixel == n ? .black : .white)
                             }
                         }
                     }
@@ -126,7 +137,7 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 20)
                 
-                Text("\(1 << (camera.bitsPerComponent * 3)) colors")
+                Text("\(1 << camera.bitsPerPixel) colors (\(colorFormatName(camera.bitsPerPixel)))")
                     .foregroundColor(.gray)
                     .font(.system(size: 14))
                     .padding(.bottom, (UIDevice.current.userInterfaceIdiom != .phone || hasHomeButton) ? 20 : 0)
@@ -144,10 +155,10 @@ struct ContentView: View {
         .onChange(of: camera.capturedImage) { newImage in
             guard let img = newImage,
                   let cgImage = img.cgImage,
-                  let bits = pendingSaveBits,
+                  let pixelBits = pendingSavePixelBits,
                   let dither = pendingSaveDither,
-                  let data = imageDataWithMetadata(cgImage, bits: bits, dither: dither) else { return }
-            pendingSaveBits = nil
+                  let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, dither: dither) else { return }
+            pendingSavePixelBits = nil
             pendingSaveDither = nil
             Task {
                 try? await PHPhotoLibrary.shared().performChanges {
@@ -234,7 +245,7 @@ struct ContentView: View {
     
     private func capture() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        pendingSaveBits = camera.bitsPerComponent
+        pendingSavePixelBits = camera.bitsPerPixel
         pendingSaveDither = camera.ditherEnabled
         camera.capture()
         
@@ -250,7 +261,7 @@ struct ContentView: View {
     }
 }
 
-private func imageDataWithMetadata(_ cgImage: CGImage, bits: Int, dither: Bool) -> Data? {
+private func imageDataWithMetadata(_ cgImage: CGImage, pixelBits: Int, dither: Bool) -> Data? {
     let data = NSMutableData()
     let format = "public.png"
     guard let dest = CGImageDestinationCreateWithData(data, format as CFString, 1, nil) else { return nil }
@@ -258,7 +269,7 @@ private func imageDataWithMetadata(_ cgImage: CGImage, bits: Int, dither: Bool) 
     let ditherStr = dither ? " dithered" : " quantized"
     let metadata: [String: Any] = [
         kCGImagePropertyExifDictionary as String: [
-            kCGImagePropertyExifLensModel as String: "Smolcam \(bits)-bit\(ditherStr)"
+            kCGImagePropertyExifLensModel as String: "Smolcam \(pixelBits)-bit\(ditherStr)"
         ]
     ]
     

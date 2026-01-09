@@ -21,6 +21,12 @@ fragment float4 fragmentPassthrough(VertexOut in [[stage_in]],
     return tex.sample(s, in.texCoord);
 }
 
+inline float3 getMaxLevels(int bitsPerPixel) {
+    if (bitsPerPixel == 8) return float3(7.0, 7.0, 3.0);
+    if (bitsPerPixel == 16) return float3(31.0, 63.0, 31.0);
+    return float3((1 << (bitsPerPixel / 3)) - 1);
+}
+
 constant float bayer16x16[256] = {
       0,128, 32,160,  8,136, 40,168,  2,130, 34,162, 10,138, 42,170,
     192, 64,224, 96,200, 72,232,104,194, 66,226, 98,202, 74,234,106,
@@ -43,21 +49,21 @@ constant float bayer16x16[256] = {
 kernel void ditherQuantize(
     texture2d<float, access::read> inTex [[texture(0)]],
     texture2d<float, access::write> outTex [[texture(1)]],
-    constant int &bits [[buffer(0)]],
+    constant int &bitsPerPixel [[buffer(0)]],
     constant int &dither [[buffer(1)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
     if (gid.x >= inTex.get_width() || gid.y >= inTex.get_height()) return;
     
     float4 color = inTex.read(gid);
-    float maxLevel = float((1 << bits) - 1);
+    float3 maxLevels = getMaxLevels(bitsPerPixel);
     
     if (dither != 0) {
         uint idx = (gid.y % 16) * 16 + (gid.x % 16);
         float threshold = bayer16x16[idx] / 256.0;
-        color.rgb = floor(color.rgb * maxLevel + threshold * 0.9) / maxLevel;
+        color.rgb = floor(color.rgb * maxLevels + threshold * 0.9) / maxLevels;
     } else {
-        color.rgb = floor(color.rgb * maxLevel + 0.5) / maxLevel;
+        color.rgb = floor(color.rgb * maxLevels + 0.5) / maxLevels;
     }
     
     outTex.write(float4(saturate(color.rgb), color.a), gid);
@@ -66,7 +72,7 @@ kernel void ditherQuantize(
 kernel void downsampleQuantize(
     texture2d<float, access::read> inTex [[texture(0)]],
     texture2d<float, access::write> outTex [[texture(1)]],
-    constant int &bits [[buffer(0)]],
+    constant int &bitsPerPixel [[buffer(0)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
     uint outW = outTex.get_width(), outH = outTex.get_height();
@@ -82,11 +88,11 @@ kernel void downsampleQuantize(
             sum += inTex.read(uint2(x, y)).rgb;
     
     float3 avg = sum / float((x1 - x0) * (y1 - y0));
-    float maxLevel = float((1 << bits) - 1);
+    float3 maxLevels = getMaxLevels(bitsPerPixel);
     
     uint idx = (gid.y % 16) * 16 + (gid.x % 16);
     float threshold = bayer16x16[idx] / 256.0;
-    float3 quantized = floor(avg * maxLevel + threshold) / maxLevel;
+    float3 quantized = floor(avg * maxLevels + threshold) / maxLevels;
 
     outTex.write(float4(quantized, 1.0), gid);
 }
