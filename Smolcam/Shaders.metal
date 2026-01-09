@@ -22,6 +22,7 @@ fragment float4 fragmentPassthrough(VertexOut in [[stage_in]],
 }
 
 inline float3 getMaxLevels(int bitsPerPixel) {
+    if (bitsPerPixel == 4) return float3(1.0, 3.0, 1.0);
     if (bitsPerPixel == 8) return float3(7.0, 7.0, 3.0);
     if (bitsPerPixel == 16) return float3(31.0, 63.0, 31.0);
     return float3((1 << (bitsPerPixel / 3)) - 1);
