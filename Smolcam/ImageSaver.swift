@@ -27,7 +27,7 @@ nonisolated func imageDataWithMetadata(_ cgImage: CGImage, pixelBits: Int, dithe
     return data as Data
 }
 
-private func createIndexedPNG(_ cgImage: CGImage, bitDepth: Int, exifText: String) -> Data? {
+nonisolated private func createIndexedPNG(_ cgImage: CGImage, bitDepth: Int, exifText: String) -> Data? {
     let w = cgImage.width, h = cgImage.height
     guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
                                space: CGColorSpaceCreateDeviceRGB(),
@@ -86,7 +86,7 @@ private func createIndexedPNG(_ cgImage: CGImage, bitDepth: Int, exifText: Strin
     return png
 }
 
-private func buildExifWithLensModel(_ lensModel: String) -> Data {
+nonisolated private func buildExifWithLensModel(_ lensModel: String) -> Data {
     let str = Data(lensModel.utf8) + Data([0])  // null-terminated
     let strLen = UInt32(str.count)
     // TIFF header (big-endian) + IFD0 (1 entry: ExifIFDPointer) + Exif IFD (1 entry: LensModel) + string
@@ -118,10 +118,10 @@ private func buildExifWithLensModel(_ lensModel: String) -> Data {
     return exif
 }
 
-private func beUInt16(_ v: UInt16) -> [UInt8] { [UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)] }
-private func beUInt32(_ v: UInt32) -> [UInt8] { [UInt8(v >> 24 & 0xFF), UInt8(v >> 16 & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)] }
+nonisolated private func beUInt16(_ v: UInt16) -> [UInt8] { [UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)] }
+nonisolated private func beUInt32(_ v: UInt32) -> [UInt8] { [UInt8(v >> 24 & 0xFF), UInt8(v >> 16 & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)] }
 
-private func pngChunk(_ type: String, data: Data) -> Data {
+nonisolated private func pngChunk(_ type: String, data: Data) -> Data {
     var chunk = Data()
     let len = UInt32(data.count)
     chunk.append(contentsOf: [UInt8(len >> 24 & 0xFF), UInt8(len >> 16 & 0xFF), UInt8(len >> 8 & 0xFF), UInt8(len & 0xFF)])
@@ -133,7 +133,7 @@ private func pngChunk(_ type: String, data: Data) -> Data {
     return chunk
 }
 
-private func crc32(_ data: Data) -> UInt32 {
+nonisolated private func crc32(_ data: Data) -> UInt32 {
     var crc: UInt32 = 0xFFFFFFFF
     for byte in data {
         crc ^= UInt32(byte)
@@ -142,7 +142,7 @@ private func crc32(_ data: Data) -> UInt32 {
     return ~crc
 }
 
-private func deflate(_ data: Data) -> Data? {
+nonisolated private func deflate(_ data: Data) -> Data? {
     let destSize = data.count + 1024
     var dest = Data(count: destSize)
     let result = dest.withUnsafeMutableBytes { destPtr in
@@ -161,7 +161,7 @@ private func deflate(_ data: Data) -> Data? {
     return zlib
 }
 
-private func adler32(_ data: Data) -> UInt32 {
+nonisolated private func adler32(_ data: Data) -> UInt32 {
     var a: UInt32 = 1, b: UInt32 = 0
     for byte in data { a = (a + UInt32(byte)) % 65521; b = (b + a) % 65521 }
     return (b << 16) | a
