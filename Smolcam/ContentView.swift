@@ -1,6 +1,5 @@
 import SwiftUI
 import Photos
-import ImageIO
 import MetalKit
 
 private let colorFormatNames: [Int: String] = [
@@ -157,14 +156,16 @@ struct ContentView: View {
             guard let img = newImage,
                   let cgImage = img.cgImage,
                   let pixelBits = pendingSavePixelBits,
-                  let dither = pendingSaveDither,
-                  let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, dither: dither) else { return }
+                  let dither = pendingSaveDither else { return }
             pendingSavePixelBits = nil
             pendingSaveDither = nil
-            Task {
-                try? await PHPhotoLibrary.shared().performChanges {
-                    let request = PHAssetCreationRequest.forAsset()
-                    request.addResource(with: .photo, data: data, options: nil)
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, dither: dither) else { return }
+                Task {
+                    try? await PHPhotoLibrary.shared().performChanges {
+                        let request = PHAssetCreationRequest.forAsset()
+                        request.addResource(with: .photo, data: data, options: nil)
+                    }
                 }
             }
         }
@@ -260,23 +261,6 @@ struct ContentView: View {
             }
         }
     }
-}
-
-private func imageDataWithMetadata(_ cgImage: CGImage, pixelBits: Int, dither: Bool) -> Data? {
-    let data = NSMutableData()
-    let format = "public.png"
-    guard let dest = CGImageDestinationCreateWithData(data, format as CFString, 1, nil) else { return nil }
-    
-    let ditherStr = dither ? " dithered" : " quantized"
-    let metadata: [String: Any] = [
-        kCGImagePropertyExifDictionary as String: [
-            kCGImagePropertyExifLensModel as String: "Smolcam \(pixelBits)-bit\(ditherStr)"
-        ]
-    ]
-    
-    CGImageDestinationAddImage(dest, cgImage, metadata as CFDictionary)
-    CGImageDestinationFinalize(dest)
-    return data as Data
 }
 
 #Preview {
