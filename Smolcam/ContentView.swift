@@ -3,7 +3,6 @@ import Photos
 import MetalKit
 
 private let colorFormatNames: [Int: String] = [
-    4: "RGB121",
     8: "RGB332",
     16: "RGB565"
 ]
@@ -111,7 +110,7 @@ struct ContentView: View {
                 
                 HStack(spacing: 8) {
                     HStack(spacing: 0) {
-                        ForEach([3, 4, 6, 8, 12, 16, 24], id: \.self) { n in
+                        ForEach([3, 6, 8, 12, 16, 24], id: \.self) { n in
                             Button { camera.bitsPerPixel = n } label: {
                                 Text("\(n)")
                                     .font(.system(size: 16, weight: camera.bitsPerPixel == n ? .bold : .regular))
