@@ -136,10 +136,19 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 20)
                 
-                Text("\(1 << camera.bitsPerPixel) colors (\(colorFormatName(camera.bitsPerPixel)))")
-                    .foregroundColor(.gray)
-                    .font(.system(size: 14))
-                    .padding(.bottom, (UIDevice.current.userInterfaceIdiom != .phone || hasHomeButton) ? 20 : 0)
+                HStack {
+                    Text("\(1 << camera.bitsPerPixel) colors (\(colorFormatName(camera.bitsPerPixel)))")
+                        .foregroundColor(.gray)
+                        .font(.system(size: 14))
+                    
+                    Spacer()
+                    
+                    Text(camera.ditherEnabled ? "dithering on" : "dithering off")
+                        .foregroundColor(.gray)
+                        .font(.system(size: 14))
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, (UIDevice.current.userInterfaceIdiom != .phone || hasHomeButton) ? 20 : 0)
             }
         }
         .statusBarHidden(true)

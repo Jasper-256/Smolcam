@@ -16,11 +16,11 @@ class CameraManager: NSObject, ObservableObject {
     @Published var isFront = isMac
     @Published var bitsPerPixel = 8
     @Published var deviceOrientation: UIImage.Orientation = .up
-    @Published var ditherEnabled = true
+    @Published var ditherEnabled = false
     @Published var zoomLevel: CGFloat = 1.0
     
-    var backgroundWidth = 6
-    var backgroundHeight = 8
+    var backgroundWidth = 12
+    var backgroundHeight = 16
     var backgroundSnapshot: UIImage?
     
     private var currentDevice: AVCaptureDevice?
