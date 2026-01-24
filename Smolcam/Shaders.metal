@@ -181,8 +181,7 @@ kernel void ditherQuantize(
     texture2d<float, access::read> inTex [[texture(0)]],
     texture2d<float, access::write> outTex [[texture(1)]],
     constant int &bitsPerPixel [[buffer(0)]],
-    constant int &dither [[buffer(1)]],
-    constant int &ditherType [[buffer(2)]],
+    constant int &ditherMode [[buffer(1)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
     if (gid.x >= inTex.get_width() || gid.y >= inTex.get_height()) return;
@@ -190,15 +189,13 @@ kernel void ditherQuantize(
     float4 color = inTex.read(gid);
     float3 maxLevels = getMaxLevels(bitsPerPixel);
     
-    if (dither != 0) {
-        float threshold;
-        if (ditherType == 0) {
-            uint idx = (gid.y % 16) * 16 + (gid.x % 16);
-            threshold = bayer16x16[idx] / 256.0;
-        } else {
-            uint idx = (gid.y % 128) * 128 + (gid.x % 128);
-            threshold = blueNoise128x128[idx] / 256.0;
-        }
+    if (ditherMode == 1) {
+        uint idx = (gid.y % 16) * 16 + (gid.x % 16);
+        float threshold = bayer16x16[idx] / 256.0;
+        color.rgb = floor(color.rgb * maxLevels + threshold * 0.9) / maxLevels;
+    } else if (ditherMode == 2) {
+        uint idx = (gid.y % 128) * 128 + (gid.x % 128);
+        float threshold = blueNoise128x128[idx] / 256.0;
         color.rgb = floor(color.rgb * maxLevels + threshold * 0.9) / maxLevels;
     } else {
         color.rgb = floor(color.rgb * maxLevels + 0.5) / maxLevels;

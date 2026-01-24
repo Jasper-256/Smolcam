@@ -37,8 +37,7 @@ struct ContentView: View {
     @State private var baseZoom: CGFloat = 1.0
     @State private var lastMag: CGFloat = 0
     @State private var pendingSavePixelBits: Int?
-    @State private var pendingSaveDither: Bool?
-    @State private var pendingSaveUseBlueNoise: Bool?
+    @State private var pendingSaveDitherMode: Int?
     
     var body: some View {
         ZStack {
@@ -126,37 +125,34 @@ struct ContentView: View {
                         
                         HStack(spacing: 0) {
                             Button {
-                                camera.ditherEnabled = false
-                                camera.useBlueNoise = false
+                                camera.ditherMode = 0
                             } label: {
                                 Image(systemName: "circle.slash")
                                     .font(.system(size: 16))
                                     .frame(maxWidth: .infinity, minHeight: 44)
-                                    .background(!camera.ditherEnabled ? Color.white : Color.clear)
-                                    .foregroundColor(!camera.ditherEnabled ? .black : .white)
+                                    .background(camera.ditherMode == 0 ? Color.white : Color.clear)
+                                    .foregroundColor(camera.ditherMode == 0 ? .black : .white)
                             }
                             
                             Button {
-                                camera.ditherEnabled = true
-                                camera.useBlueNoise = false
+                                camera.ditherMode = 1
                             } label: {
                                 Image(systemName: "checkerboard.rectangle")
                                     .rotationEffect(.degrees(90))
                                     .font(.system(size: 16))
                                     .frame(maxWidth: .infinity, minHeight: 44)
-                                    .background(camera.ditherEnabled && !camera.useBlueNoise ? Color.white : Color.clear)
-                                    .foregroundColor(camera.ditherEnabled && !camera.useBlueNoise ? .black : .white)
+                                    .background(camera.ditherMode == 1 ? Color.white : Color.clear)
+                                    .foregroundColor(camera.ditherMode == 1 ? .black : .white)
                             }
                             
                             Button {
-                                camera.ditherEnabled = true
-                                camera.useBlueNoise = true
+                                camera.ditherMode = 2
                             } label: {
                                 Image(systemName: "aqi.medium")
                                     .font(.system(size: 16))
                                     .frame(maxWidth: .infinity, minHeight: 44)
-                                    .background(camera.ditherEnabled && camera.useBlueNoise ? Color.white : Color.clear)
-                                    .foregroundColor(camera.ditherEnabled && camera.useBlueNoise ? .black : .white)
+                                    .background(camera.ditherMode == 2 ? Color.white : Color.clear)
+                                    .foregroundColor(camera.ditherMode == 2 ? .black : .white)
                             }
                         }
                         .frame(width: ditherWidth)
@@ -174,7 +170,7 @@ struct ContentView: View {
                     
                     Spacer()
                     
-                    Text(!camera.ditherEnabled ? "no dither" : (camera.useBlueNoise ? "blue noise dither" : "bayer dither"))
+                    Text(ditherModeNames[camera.ditherMode])
                         .foregroundColor(.gray)
                         .font(.system(size: 14))
                 }
@@ -195,13 +191,11 @@ struct ContentView: View {
             guard let img = newImage,
                   let cgImage = img.cgImage,
                   let pixelBits = pendingSavePixelBits,
-                  let dither = pendingSaveDither,
-                  let useBlueNoise = pendingSaveUseBlueNoise else { return }
+                  let ditherMode = pendingSaveDitherMode else { return }
             pendingSavePixelBits = nil
-            pendingSaveDither = nil
-            pendingSaveUseBlueNoise = nil
+            pendingSaveDitherMode = nil
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, dither: dither, useBlueNoise: useBlueNoise) else { return }
+                guard let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, ditherMode: ditherMode) else { return }
                 Task {
                     try? await PHPhotoLibrary.shared().performChanges {
                         let request = PHAssetCreationRequest.forAsset()
@@ -288,8 +282,7 @@ struct ContentView: View {
     private func capture() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         pendingSavePixelBits = camera.bitsPerPixel
-        pendingSaveDither = camera.ditherEnabled
-        pendingSaveUseBlueNoise = camera.useBlueNoise
+        pendingSaveDitherMode = camera.ditherMode
         camera.capture()
         
         withAnimation(.easeInOut(duration: 0.2)) {

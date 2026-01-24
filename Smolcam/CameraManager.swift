@@ -10,13 +10,14 @@ let hasHomeButton: Bool = {
     return window.safeAreaInsets.bottom == 0
 }()
 
+let ditherModeNames = ["no dither", "bayer dither", "blue noise dither"]
+
 class CameraManager: NSObject, ObservableObject {
     @Published var capturedImage: UIImage?
     @Published var isFront = false
     @Published var bitsPerPixel = 8
     @Published var deviceOrientation: UIImage.Orientation = .up
-    @Published var ditherEnabled = false
-    @Published var useBlueNoise = false
+    @Published var ditherMode = 0
     @Published var zoomLevel: CGFloat = 1.0
     
     var backgroundWidth = 12
@@ -238,7 +239,7 @@ class CameraManager: NSObject, ObservableObject {
         shouldCapture = true
     }
     
-    private func processToTexture(_ pixelBuffer: CVPixelBuffer, bits: Int, dither: Bool) -> MTLTexture? {
+    private func processToTexture(_ pixelBuffer: CVPixelBuffer, bits: Int, dither: Int) -> MTLTexture? {
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         
@@ -257,15 +258,13 @@ class CameraManager: NSObject, ObservableObject {
               let encoder = cmdBuffer.makeComputeCommandEncoder() else { return nil }
         
         var bitsVal = Int32(bits)
-        var ditherVal: Int32 = dither ? 1 : 0
-        var ditherTypeVal: Int32 = useBlueNoise ? 1 : 0
+        var ditherModeVal = Int32(dither)
         
         encoder.setComputePipelineState(computePipeline)
         encoder.setTexture(inTexture, index: 0)
         encoder.setTexture(outTex, index: 1)
         encoder.setBytes(&bitsVal, length: 4, index: 0)
-        encoder.setBytes(&ditherVal, length: 4, index: 1)
-        encoder.setBytes(&ditherTypeVal, length: 4, index: 2)
+        encoder.setBytes(&ditherModeVal, length: 4, index: 1)
         
         let tgSize = MTLSize(width: 16, height: 16, depth: 1)
         let tgCount = MTLSize(width: (width + 15) / 16, height: (height + 15) / 16, depth: 1)
@@ -377,7 +376,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
         let bits = bitsPerPixel
-        let dither = ditherEnabled
+        let dither = ditherMode
         let capture = shouldCapture
         
         guard let texture = processToTexture(pb, bits: bits, dither: dither) else { return }
