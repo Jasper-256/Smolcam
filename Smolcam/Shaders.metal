@@ -147,11 +147,24 @@ kernel void buildHistogram(texture2d<float, access::read> inTex [[texture(0)]], 
     atomic_fetch_add_explicit(&histogram[min(b.b, 31u) * 1024 + min(b.g, 31u) * 32 + min(b.r, 31u)], 1, memory_order_relaxed);
 }
 
-struct ColorBox { uint3 minC, maxC; uint count, pad; };
+struct ColorBox { 
+    uint3 minC, maxC; 
+    uint count;
+    float priority;  // sqrt(count) * volume for weighted median cut
+};
+
+// Compute priority for a box: sqrt(count) * volume
+// Higher priority = more important to split (balances pixel count vs color diversity)
+inline float computePriority(uint3 minC, uint3 maxC, uint count) {
+    if (count == 0) return 0.0;
+    uint3 range = maxC - minC + uint3(1);
+    float volume = float(range.r) * float(range.g) * float(range.b);
+    return sqrt(float(count)) * volume;
+}
 
 // Initialize first box covering all colors
 kernel void initColorBox(device ColorBox *boxes [[buffer(0)]], device const uint *hist [[buffer(1)]]) {
-    uint3 lo = uint3(63), hi = uint3(0);
+    uint3 lo = uint3(31), hi = uint3(0);
     uint total = 0;
     for (uint i = 0; i < HIST_TOTAL; i++) {
         uint c = hist[i];
@@ -161,7 +174,8 @@ kernel void initColorBox(device ColorBox *boxes [[buffer(0)]], device const uint
             total += c;
         }
     }
-    boxes[0] = ColorBox{lo, hi, total, 0};
+    float priority = computePriority(lo, hi, total);
+    boxes[0] = ColorBox{lo, hi, total, priority};
 }
 
 // Parallel 3D prefix sum - split into 4 kernels for parallelization
@@ -239,70 +253,121 @@ inline uint boxSum(device const uint *prefix, uint3 lo, uint3 hi) {
          - queryPrefix(prefix, r0, g0, b0);
 }
 
-// Parallel median cut using 3D prefix sum for O(1) box queries
-kernel void medianCutSplitParallel(
+// Complete priority-based median cut running entirely on GPU
+// Uses parallel reduction with threadgroup memory to find max priority box in O(log n)
+// Eliminates all CPU-GPU synchronization by running the entire loop on GPU
+kernel void medianCutComplete(
     device ColorBox *boxes [[buffer(0)]],
-    device const uint *prefix [[buffer(1)]],  // Now uses prefix sum instead of histogram
-    constant int &levelOffset [[buffer(2)]],
-    uint tid [[thread_position_in_grid]]
+    device const uint *prefix [[buffer(1)]],
+    constant int &targetColors [[buffer(2)]],
+    uint lid [[thread_position_in_threadgroup]]
 ) {
-    if (tid >= uint(levelOffset)) return;
+    // Threadgroup memory for parallel reduction (supports up to 256 colors)
+    threadgroup float tgPriorities[256];
+    threadgroup int tgIndices[256];
     
-    ColorBox box = boxes[tid];
-    uint3 range = box.maxC - box.minC;
-    
-    // Find longest axis
-    int axis = (range.g > range.r && range.g >= range.b) ? 1 : (range.b > range.r && range.b > range.g) ? 2 : 0;
-    uint axisMin = (axis == 0) ? box.minC.r : (axis == 1) ? box.minC.g : box.minC.b;
-    uint axisMax = (axis == 0) ? box.maxC.r : (axis == 1) ? box.maxC.g : box.maxC.b;
-    
-    // Can't split if range is 0
-    if (axisMin >= axisMax) {
-        boxes[tid + levelOffset] = box;
-        return;
-    }
-    
-    // Find median split point using prefix sum queries
-    uint halfCount = box.count / 2;
-    uint splitVal = axisMin + 1;
-    
-    // Binary search for the split point
-    uint lo = axisMin, hi = axisMax;
-    while (lo < hi) {
-        uint mid = (lo + hi) / 2;
+    // Main loop: split boxes until we have targetColors
+    for (int numBoxes = 1; numBoxes < targetColors; numBoxes++) {
+        // ===== PHASE 1: Parallel reduction to find max priority box =====
+        // Each thread loads one box's priority (or -1 if out of range)
+        float myPriority = -1.0;
+        int myIndex = 0;
         
-        // Count pixels in box with axis value <= mid
-        uint3 queryLo = box.minC;
-        uint3 queryHi = box.maxC;
-        if (axis == 0) queryHi.r = mid;
-        else if (axis == 1) queryHi.g = mid;
-        else queryHi.b = mid;
-        
-        uint count = boxSum(prefix, queryLo, queryHi);
-        
-        if (count < halfCount) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
+        if (int(lid) < numBoxes) {
+            ColorBox box = boxes[lid];
+            uint3 range = box.maxC - box.minC;
+            // Only consider splittable boxes (range > 0 on at least one axis)
+            if (range.r > 0 || range.g > 0 || range.b > 0) {
+                myPriority = box.priority;
+                myIndex = int(lid);
+            }
         }
+        
+        tgPriorities[lid] = myPriority;
+        tgIndices[lid] = myIndex;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        
+        // Parallel reduction: find maximum in O(log n) steps
+        // Each step halves the active threads, comparing pairs
+        for (uint stride = 128; stride > 0; stride >>= 1) {
+            if (lid < stride && lid + stride < 256) {
+                if (tgPriorities[lid + stride] > tgPriorities[lid]) {
+                    tgPriorities[lid] = tgPriorities[lid + stride];
+                    tgIndices[lid] = tgIndices[lid + stride];
+                }
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+        
+        // ===== PHASE 2: Thread 0 performs the split =====
+        if (lid == 0) {
+            int splitIndex = tgIndices[0];
+            int newBoxIndex = numBoxes;
+            
+            ColorBox box = boxes[splitIndex];
+            uint3 range = box.maxC - box.minC;
+            
+            // Find longest axis
+            int axis = (range.g > range.r && range.g >= range.b) ? 1 : 
+                       (range.b > range.r && range.b > range.g) ? 2 : 0;
+            uint axisMin = (axis == 0) ? box.minC.r : (axis == 1) ? box.minC.g : box.minC.b;
+            uint axisMax = (axis == 0) ? box.maxC.r : (axis == 1) ? box.maxC.g : box.maxC.b;
+            
+            // Handle unsplittable box (range is 0)
+            if (axisMin >= axisMax) {
+                boxes[newBoxIndex] = box;
+                boxes[newBoxIndex].priority = 0.0;
+            } else {
+                // Binary search for median split point using prefix sum
+                uint halfCount = box.count / 2;
+                uint lo = axisMin, hi = axisMax;
+                
+                while (lo < hi) {
+                    uint mid = (lo + hi) / 2;
+                    
+                    // Count pixels in box with axis value <= mid
+                    uint3 queryLo = box.minC;
+                    uint3 queryHi = box.maxC;
+                    if (axis == 0) queryHi.r = mid;
+                    else if (axis == 1) queryHi.g = mid;
+                    else queryHi.b = mid;
+                    
+                    uint count = boxSum(prefix, queryLo, queryHi);
+                    
+                    if (count < halfCount) {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                
+                uint splitVal = max(lo, axisMin + 1);
+                if (splitVal > axisMax) splitVal = axisMax;
+                
+                // Create child boxes
+                ColorBox box1 = box, box2 = box;
+                if (axis == 0) { box1.maxC.r = splitVal - 1; box2.minC.r = splitVal; }
+                else if (axis == 1) { box1.maxC.g = splitVal - 1; box2.minC.g = splitVal; }
+                else { box1.maxC.b = splitVal - 1; box2.minC.b = splitVal; }
+                
+                // Count pixels in each child using prefix sum (O(1) each)
+                uint c1 = boxSum(prefix, box1.minC, box1.maxC);
+                uint c2 = boxSum(prefix, box2.minC, box2.maxC);
+                
+                box1.count = c1;
+                box2.count = c2;
+                box1.priority = computePriority(box1.minC, box1.maxC, c1);
+                box2.priority = computePriority(box2.minC, box2.maxC, c2);
+                
+                // Store results
+                boxes[splitIndex] = box1;
+                boxes[newBoxIndex] = box2;
+            }
+        }
+        
+        // All threads wait for the split to complete before next iteration
+        threadgroup_barrier(mem_flags::mem_threadgroup);
     }
-    splitVal = max(lo, axisMin + 1);
-    if (splitVal > axisMax) splitVal = axisMax;
-    
-    // Create child boxes
-    ColorBox box1 = box, box2 = box;
-    if (axis == 0) { box1.maxC.r = splitVal - 1; box2.minC.r = splitVal; }
-    else if (axis == 1) { box1.maxC.g = splitVal - 1; box2.minC.g = splitVal; }
-    else { box1.maxC.b = splitVal - 1; box2.minC.b = splitVal; }
-    
-    // Count pixels in each child using prefix sum (O(1) each)
-    uint c1 = boxSum(prefix, box1.minC, box1.maxC);
-    uint c2 = boxSum(prefix, box2.minC, box2.maxC);
-    
-    box1.count = c1;
-    box2.count = c2;
-    boxes[tid] = box1;
-    boxes[tid + levelOffset] = box2;
 }
 
 // Compute palette color for each box

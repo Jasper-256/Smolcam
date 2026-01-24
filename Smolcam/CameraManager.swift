@@ -56,7 +56,7 @@ class CameraManager: NSObject, ObservableObject {
     private let prefixSumPassGPipeline: MTLComputePipelineState
     private let prefixSumPassBPipeline: MTLComputePipelineState
     private let initColorBoxPipeline: MTLComputePipelineState
-    private let medianCutSplitParallelPipeline: MTLComputePipelineState
+    private let medianCutCompletePipeline: MTLComputePipelineState
     private let computePaletteColorsPipeline: MTLComputePipelineState
     private let buildPaletteLUTPipeline: MTLComputePipelineState
     private let applyAdaptivePalettePipeline: MTLComputePipelineState
@@ -106,8 +106,8 @@ class CameraManager: NSObject, ObservableObject {
               let prefixSumPassBPipeline = try? device.makeComputePipelineState(function: prefixSumPassBKernel),
               let initColorBoxKernel = library.makeFunction(name: "initColorBox"),
               let initColorBoxPipeline = try? device.makeComputePipelineState(function: initColorBoxKernel),
-              let medianCutSplitParallelKernel = library.makeFunction(name: "medianCutSplitParallel"),
-              let medianCutSplitParallelPipeline = try? device.makeComputePipelineState(function: medianCutSplitParallelKernel),
+              let medianCutCompleteKernel = library.makeFunction(name: "medianCutComplete"),
+              let medianCutCompletePipeline = try? device.makeComputePipelineState(function: medianCutCompleteKernel),
               let computePaletteColorsKernel = library.makeFunction(name: "computePaletteColors"),
               let computePaletteColorsPipeline = try? device.makeComputePipelineState(function: computePaletteColorsKernel),
               let buildPaletteLUTKernel = library.makeFunction(name: "buildPaletteLUT"),
@@ -145,7 +145,7 @@ class CameraManager: NSObject, ObservableObject {
         self.prefixSumPassGPipeline = prefixSumPassGPipeline
         self.prefixSumPassBPipeline = prefixSumPassBPipeline
         self.initColorBoxPipeline = initColorBoxPipeline
-        self.medianCutSplitParallelPipeline = medianCutSplitParallelPipeline
+        self.medianCutCompletePipeline = medianCutCompletePipeline
         self.computePaletteColorsPipeline = computePaletteColorsPipeline
         self.buildPaletteLUTPipeline = buildPaletteLUTPipeline
         self.applyAdaptivePalettePipeline = applyAdaptivePalettePipeline
@@ -164,7 +164,7 @@ class CameraManager: NSObject, ObservableObject {
         prefixSumBuffer = device.makeBuffer(length: histogramSize * MemoryLayout<UInt32>.size, options: .storageModeShared)
         
         // Color box buffer: up to 256 boxes (for 256 colors max)
-        // Each ColorBox is 32 bytes (uint3 minC, uint3 maxC, uint pixelCount, uint padding)
+        // Each ColorBox is 32 bytes (uint3 minC, uint3 maxC, uint count, float priority)
         colorBoxBuffer = device.makeBuffer(length: maxPaletteColors * 32, options: .storageModeShared)
         
         // Palette buffer: up to 256 float3 colors (each float3 is 16 bytes aligned)
@@ -479,7 +479,7 @@ class CameraManager: NSObject, ObservableObject {
             cmdBuffer.waitUntilCompleted()
         }
         
-        // ========== BATCH C: Init Color Box + Median Cut ==========
+        // ========== BATCH C: Init Color Box + Complete Median Cut (single GPU dispatch) ==========
         if let cmdBuffer = commandQueue.makeCommandBuffer() {
             // Initialize first color box
             if let enc = cmdBuffer.makeComputeCommandEncoder() {
@@ -492,20 +492,17 @@ class CameraManager: NSObject, ObservableObject {
                 enc.endEncoding()
             }
             
-            // Parallel median cut - all iterations in one command buffer
-            var levelOffset: Int32 = 1
-            while levelOffset < Int32(paletteSize) {
-                if let enc = cmdBuffer.makeComputeCommandEncoder() {
-                    enc.setComputePipelineState(medianCutSplitParallelPipeline)
-                    enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
-                    enc.setBuffer(prefixSumBuffer, offset: 0, index: 1)
-                    enc.setBytes(&levelOffset, length: 4, index: 2)
-                    enc.dispatchThreads(MTLSize(width: Int(levelOffset), height: 1, depth: 1),
-                                       threadsPerThreadgroup: MTLSize(width: min(Int(levelOffset), 256), height: 1, depth: 1))
-                    enc.memoryBarrier(scope: .buffers)
-                    enc.endEncoding()
-                }
-                levelOffset *= 2
+            // Complete median cut on GPU with parallel reduction
+            // Runs entire loop on GPU, eliminating all CPU-GPU synchronization
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(medianCutCompletePipeline)
+                enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
+                enc.setBuffer(prefixSumBuffer, offset: 0, index: 1)
+                enc.setBytes(&paletteSizeVal, length: 4, index: 2)
+                // Dispatch single threadgroup of 256 threads for parallel reduction
+                enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1),
+                                        threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+                enc.endEncoding()
             }
             
             cmdBuffer.commit()
