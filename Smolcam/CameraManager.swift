@@ -32,6 +32,8 @@ class CameraManager: NSObject, ObservableObject {
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "camera")
+    private let sessionQueue = DispatchQueue(label: "camera.session", qos: .userInitiated)
+    private var isFlipping = false
     private var shouldCapture = false
     private var captureOrientation: UIImage.Orientation = .up
     private var captureIsFront = false
@@ -168,9 +170,9 @@ class CameraManager: NSObject, ObservableObject {
         // Palette buffer: up to 256 float3 colors (each float3 is 16 bytes aligned)
         paletteBuffer = device.makeBuffer(length: maxPaletteColors * MemoryLayout<SIMD3<Float>>.stride, options: .storageModeShared)
         
-        // LUT buffer: 32x32x32 entries, each containing 16 float3 (16 nearest colors)
-        // PaletteLUTEntry is 256 bytes (16 float3, each padded to 16 bytes in Metal)
-        paletteLUTBuffer = device.makeBuffer(length: histogramSize * 256, options: .storageModeShared)
+        // LUT buffer: 32x32x32 entries, each containing 8 float3 (8 nearest colors)
+        // PaletteLUTEntry is 128 bytes (8 float3, each padded to 16 bytes in Metal)
+        paletteLUTBuffer = device.makeBuffer(length: histogramSize * 128, options: .storageModeShared)
     }
     
     private func setupSession() {
@@ -259,7 +261,10 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     func flipCamera() {
-        queue.async {
+        guard !isFlipping else { return }
+        isFlipping = true
+        
+        sessionQueue.async {
             self.session.beginConfiguration()
             
             if let current = self.session.inputs.first as? AVCaptureDeviceInput {
@@ -271,6 +276,7 @@ class CameraManager: NSObject, ObservableObject {
                   let input = try? AVCaptureDeviceInput(device: camDevice),
                   self.session.canAddInput(input) else {
                 self.session.commitConfiguration()
+                self.isFlipping = false
                 return
             }
             
@@ -292,6 +298,7 @@ class CameraManager: NSObject, ObservableObject {
             }
             
             self.session.commitConfiguration()
+            self.isFlipping = false
             DispatchQueue.main.async {
                 self.isFront = !self.isFront
                 self.zoomLevel = newBase
@@ -317,8 +324,8 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
     
-    func start() { queue.async { self.session.startRunning() } }
-    func stop() { queue.async { self.session.stopRunning() } }
+    func start() { sessionQueue.async { self.session.startRunning() } }
+    func stop() { sessionQueue.async { self.session.stopRunning() } }
     
     func capture() {
         captureOrientation = deviceOrientation
@@ -646,6 +653,8 @@ extension CameraManager: MTKViewDelegate {
 
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        // Skip processing during camera flip to avoid queue backup
+        guard !isFlipping else { return }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
         let bits = bitsPerPixel

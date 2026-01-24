@@ -329,13 +329,13 @@ kernel void computePaletteColors(
     palette[tid] = (total > 0) ? sum / float(total * 31) : float3(box.minC + box.maxC) / 62.0;
 }
 
-// LUT entry: stores up to 16 nearest palette colors for smooth dithering
-// Terminator value (-1, -1, -1) marks the end when fewer than 16 colors available
-constant int LUT_CANDIDATES = 16;
+// LUT entry: stores up to 8 nearest palette colors for smooth dithering
+// Terminator value (-1, -1, -1) marks the end when fewer than 8 colors available
+constant int LUT_CANDIDATES = 8;
 constant float3 LUT_TERMINATOR = float3(-1.0, -1.0, -1.0);
 
 struct PaletteLUTEntry {
-    float3 colors[16];  // Up to 16 nearest palette colors, sorted by distance
+    float3 colors[8];  // Up to 8 nearest palette colors, sorted by distance
 };
 
 // Check if a color is the terminator value
@@ -343,9 +343,9 @@ inline bool isTerminator(float3 color) {
     return color.r < 0.0;
 }
 
-// Build 32x32x32 LUT mapping each quantized RGB to up to 16 nearest palette colors
+// Build 32x32x32 LUT mapping each quantized RGB to up to 8 nearest palette colors
 // Distance calculations done in linear space for perceptually correct results
-// If palette has fewer than 16 colors, remaining slots are filled with terminator
+// If palette has fewer than 8 colors, remaining slots are filled with terminator
 kernel void buildPaletteLUT(
     device PaletteLUTEntry *lut [[buffer(0)]],
     device const float3 *palette [[buffer(1)]],
@@ -361,12 +361,11 @@ kernel void buildPaletteLUT(
     float3 rgbLinear = srgbToLinear3(rgb);
     
     // How many candidates can we actually store?
-    int numCandidates = min(paletteSize / 2, 16);
+    int numCandidates = min(paletteSize / 2, 8);
     
-    // Find up to 16 nearest palette colors by distance in linear space
-    int indices[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    float distances[16] = {1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10,
-                           1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10};
+    // Find up to 8 nearest palette colors by distance in linear space
+    int indices[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    float distances[8] = {1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10};
     
     for (int i = 0; i < paletteSize; i++) {
         // Convert palette color to linear for comparison
@@ -393,7 +392,7 @@ kernel void buildPaletteLUT(
     }
     
     // Store valid colors in sRGB space, fill rest with terminator
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < 8; i++) {
         if (i < numCandidates) {
             lut[tid].colors[i] = palette[indices[i]];
         } else {
@@ -409,8 +408,8 @@ inline uint getLutIdx(uint3 coord) {
 }
 
 // Apply palette with ordered dithering using LUT lookup
-// Uses up to 16 nearest palette colors with inverse-distance weighting for smooth dithering.
-// Stops at terminator value if fewer than 16 colors available.
+// Uses up to 8 nearest palette colors with inverse-distance weighting for smooth dithering.
+// Stops at terminator value if fewer than 8 colors available.
 // All dithering calculations done in linear space for perceptually correct results.
 kernel void applyAdaptivePalette(
     texture2d<float, access::read> inTex [[texture(0)]],
@@ -439,7 +438,7 @@ kernel void applyAdaptivePalette(
     
     // Count valid colors (stop at terminator)
     int numColors = 0;
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < 8; i++) {
         if (isTerminator(entry.colors[i])) break;
         numColors++;
     }
@@ -454,7 +453,7 @@ kernel void applyAdaptivePalette(
     float3 rgbLinear = srgbToLinear3(rgb);
     
     // Compute distances and weights only for valid candidates
-    float weights[16];
+    float weights[8];
     float totalWeight = 0.0;
     float softening = 0.01;  // Prevents division by zero and controls sharpness
     
@@ -472,7 +471,7 @@ kernel void applyAdaptivePalette(
     }
     
     // Build cumulative distribution for threshold-based selection
-    float cumulative[16];
+    float cumulative[8];
     cumulative[0] = weights[0];
     for (int i = 1; i < numColors - 1; i++) {
         cumulative[i] = cumulative[i - 1] + weights[i];
