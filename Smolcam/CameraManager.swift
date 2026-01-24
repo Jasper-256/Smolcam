@@ -168,9 +168,9 @@ class CameraManager: NSObject, ObservableObject {
         // Palette buffer: up to 256 float3 colors (each float3 is 16 bytes aligned)
         paletteBuffer = device.makeBuffer(length: maxPaletteColors * MemoryLayout<SIMD3<Float>>.stride, options: .storageModeShared)
         
-        // LUT buffer: 32x32x32 entries, each containing two float3 (nearest + secondNearest)
-        // PaletteLUTEntry is 32 bytes (two float3, each padded to 16 bytes in Metal)
-        paletteLUTBuffer = device.makeBuffer(length: histogramSize * 32, options: .storageModeShared)
+        // LUT buffer: 32x32x32 entries, each containing 16 float3 (16 nearest colors)
+        // PaletteLUTEntry is 256 bytes (16 float3, each padded to 16 bytes in Metal)
+        paletteLUTBuffer = device.makeBuffer(length: histogramSize * 256, options: .storageModeShared)
     }
     
     private func setupSession() {

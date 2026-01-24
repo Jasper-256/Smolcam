@@ -46,6 +46,23 @@ constant float bayer16x16[256] = {
     255,127,223, 95,247,119,215, 87,253,125,221, 93,245,117,213, 85,
 };
 
+// sRGB <-> Linear conversion functions for perceptually correct dithering
+inline float srgbToLinear(float c) {
+    return (c <= 0.04045) ? (c / 12.92) : pow((c + 0.055) / 1.055, 2.4);
+}
+
+inline float linearToSrgb(float c) {
+    return (c <= 0.0031308) ? (c * 12.92) : (1.055 * pow(c, 1.0/2.4) - 0.055);
+}
+
+inline float3 srgbToLinear3(float3 c) {
+    return float3(srgbToLinear(c.r), srgbToLinear(c.g), srgbToLinear(c.b));
+}
+
+inline float3 linearToSrgb3(float3 c) {
+    return float3(linearToSrgb(c.r), linearToSrgb(c.g), linearToSrgb(c.b));
+}
+
 kernel void ditherQuantize(
     texture2d<float, access::read> inTex [[texture(0)]],
     texture2d<float, access::write> outTex [[texture(1)]],
@@ -312,13 +329,23 @@ kernel void computePaletteColors(
     palette[tid] = (total > 0) ? sum / float(total * 31) : float3(box.minC + box.maxC) / 62.0;
 }
 
-// LUT entry: stores nearest and second-nearest palette colors directly
+// LUT entry: stores up to 16 nearest palette colors for smooth dithering
+// Terminator value (-1, -1, -1) marks the end when fewer than 16 colors available
+constant int LUT_CANDIDATES = 16;
+constant float3 LUT_TERMINATOR = float3(-1.0, -1.0, -1.0);
+
 struct PaletteLUTEntry {
-    float3 nearest;
-    float3 secondNearest;
+    float3 colors[16];  // Up to 16 nearest palette colors, sorted by distance
 };
 
-// Build 32x32x32 LUT mapping each quantized RGB to nearest/second-nearest palette colors
+// Check if a color is the terminator value
+inline bool isTerminator(float3 color) {
+    return color.r < 0.0;
+}
+
+// Build 32x32x32 LUT mapping each quantized RGB to up to 16 nearest palette colors
+// Distance calculations done in linear space for perceptually correct results
+// If palette has fewer than 16 colors, remaining slots are filled with terminator
 kernel void buildPaletteLUT(
     device PaletteLUTEntry *lut [[buffer(0)]],
     device const float3 *palette [[buffer(1)]],
@@ -330,29 +357,61 @@ kernel void buildPaletteLUT(
     // Convert linear index to RGB coordinates (same layout as histogram)
     float3 rgb = float3(tid % 32, (tid / 32) % 32, tid / 1024) / 31.0;
     
-    // Find nearest and second-nearest palette colors
-    int nearestIdx = 0, secondIdx = 0;
-    float minDist = 1e10, secondDist = 1e10;
+    // Convert to linear space for distance calculations
+    float3 rgbLinear = srgbToLinear3(rgb);
+    
+    // How many candidates can we actually store?
+    int numCandidates = min(paletteSize / 2, 16);
+    
+    // Find up to 16 nearest palette colors by distance in linear space
+    int indices[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    float distances[16] = {1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10,
+                           1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10};
     
     for (int i = 0; i < paletteSize; i++) {
-        float3 diff = rgb - palette[i];
+        // Convert palette color to linear for comparison
+        float3 paletteLinear = srgbToLinear3(palette[i]);
+        float3 diff = rgbLinear - paletteLinear;
         float d = dot(diff, diff);
-        if (d < minDist) {
-            secondDist = minDist;
-            secondIdx = nearestIdx;
-            minDist = d;
-            nearestIdx = i;
-        } else if (d < secondDist) {
-            secondDist = d;
-            secondIdx = i;
+        
+        // Insert into sorted list
+        int lastIdx = numCandidates - 1;
+        if (d < distances[lastIdx]) {
+            // Find insertion point
+            int insertPos = lastIdx;
+            while (insertPos > 0 && d < distances[insertPos - 1]) {
+                insertPos--;
+            }
+            // Shift elements down
+            for (int j = lastIdx; j > insertPos; j--) {
+                distances[j] = distances[j - 1];
+                indices[j] = indices[j - 1];
+            }
+            distances[insertPos] = d;
+            indices[insertPos] = i;
         }
     }
     
-    lut[tid].nearest = palette[nearestIdx];
-    lut[tid].secondNearest = palette[secondIdx];
+    // Store valid colors in sRGB space, fill rest with terminator
+    for (int i = 0; i < 16; i++) {
+        if (i < numCandidates) {
+            lut[tid].colors[i] = palette[indices[i]];
+        } else {
+            lut[tid].colors[i] = LUT_TERMINATOR;
+        }
+    }
 }
 
-// Apply palette with dithering using LUT lookup (optimized version)
+// Helper: get LUT index from coordinates, clamped to valid range
+inline uint getLutIdx(uint3 coord) {
+    coord = min(coord, uint3(31));
+    return coord.b * 1024 + coord.g * 32 + coord.r;
+}
+
+// Apply palette with ordered dithering using LUT lookup
+// Uses up to 16 nearest palette colors with inverse-distance weighting for smooth dithering.
+// Stops at terminator value if fewer than 16 colors available.
+// All dithering calculations done in linear space for perceptually correct results.
 kernel void applyAdaptivePalette(
     texture2d<float, access::read> inTex [[texture(0)]],
     texture2d<float, access::write> outTex [[texture(1)]],
@@ -369,24 +428,68 @@ kernel void applyAdaptivePalette(
     lutCoord = min(lutCoord, uint3(31));
     uint lutIdx = lutCoord.b * 1024 + lutCoord.g * 32 + lutCoord.r;
     
-    // Lookup nearest and second-nearest colors from LUT
+    // Lookup colors from LUT
     PaletteLUTEntry entry = lut[lutIdx];
-    float3 nearest = entry.nearest;
-    float3 secondNearest = entry.secondNearest;
     
-    float3 result = nearest;
-    if (dither != 0) {
-        // Compute actual distances for dithering threshold
-        float3 diff1 = rgb - nearest;
-        float3 diff2 = rgb - secondNearest;
-        float minDist = dot(diff1, diff1);
-        float secondDist = dot(diff2, diff2);
-        
-        if (minDist > 0.0004) {  // ~0.02^2
-            float t = minDist / (minDist + secondDist);
-            if (bayer16x16[(gid.y % 16) * 16 + (gid.x % 16)] / 256.0 < t)
-                result = secondNearest;
+    // No dithering: just use nearest
+    if (dither == 0) {
+        outTex.write(float4(entry.colors[0], 1.0), gid);
+        return;
+    }
+    
+    // Count valid colors (stop at terminator)
+    int numColors = 0;
+    for (int i = 0; i < 16; i++) {
+        if (isTerminator(entry.colors[i])) break;
+        numColors++;
+    }
+    
+    // Fallback: if only 1 color or somehow 0, just use nearest
+    if (numColors <= 1) {
+        outTex.write(float4(entry.colors[0], 1.0), gid);
+        return;
+    }
+    
+    // Convert input to linear space for distance calculations
+    float3 rgbLinear = srgbToLinear3(rgb);
+    
+    // Compute distances and weights only for valid candidates
+    float weights[16];
+    float totalWeight = 0.0;
+    float softening = 0.01;  // Prevents division by zero and controls sharpness
+    
+    for (int i = 0; i < numColors; i++) {
+        float3 candLinear = srgbToLinear3(entry.colors[i]);
+        float3 diff = rgbLinear - candLinear;
+        float d = length(diff) + softening;
+        weights[i] = 1.0 / (d * d);  // Inverse square weighting
+        totalWeight += weights[i];
+    }
+    
+    // Normalize weights to sum to 1
+    for (int i = 0; i < numColors; i++) {
+        weights[i] /= totalWeight;
+    }
+    
+    // Build cumulative distribution for threshold-based selection
+    float cumulative[16];
+    cumulative[0] = weights[0];
+    for (int i = 1; i < numColors - 1; i++) {
+        cumulative[i] = cumulative[i - 1] + weights[i];
+    }
+    cumulative[numColors - 1] = 1.0;  // Ensure last valid entry is exactly 1.0
+    
+    // Get Bayer threshold for this pixel
+    float threshold = bayer16x16[(gid.y % 16) * 16 + (gid.x % 16)] / 256.0;
+    
+    // Select color based on where threshold falls in cumulative distribution
+    int selected = 0;
+    for (int i = 0; i < numColors; i++) {
+        if (threshold >= cumulative[i]) {
+            selected = i + 1;
         }
     }
-    outTex.write(float4(result, 1.0), gid);
+    selected = min(selected, numColors - 1);
+    
+    outTex.write(float4(entry.colors[selected], 1.0), gid);
 }
