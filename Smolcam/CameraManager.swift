@@ -658,7 +658,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
         let bits = bitsPerPixel
-        let dither = ditherEnabled
+        let dither = ditherEnabled && bits < 24
         let capture = shouldCapture
         let adaptivePalette = adaptivePaletteEnabled && bits <= 8
         

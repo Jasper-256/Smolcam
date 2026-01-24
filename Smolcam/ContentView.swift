@@ -117,11 +117,12 @@ struct ContentView: View {
                     .cornerRadius(8)
                     
                     Button { camera.adaptivePaletteEnabled.toggle() } label: {
+                        let isSelected = camera.adaptivePaletteEnabled && camera.bitsPerPixel <= 8
                         Image(systemName: "paintpalette")
                             .font(.system(size: 16))
                             .frame(width: 44, height: 44)
-                            .background(camera.adaptivePaletteEnabled ? Color.white : Color.clear)
-                            .foregroundColor(camera.adaptivePaletteEnabled ? .black : .white)
+                            .background(isSelected ? Color.white : Color.clear)
+                            .foregroundColor(isSelected ? .black : .white)
                     }
                     .background(Color.white.opacity(0.2))
                     .cornerRadius(8)
@@ -129,28 +130,37 @@ struct ContentView: View {
                     .disabled(camera.bitsPerPixel > 8)
                     
                     Button { camera.ditherEnabled.toggle() } label: {
+                        let isSelected = camera.ditherEnabled && camera.bitsPerPixel < 24
                         Image(systemName: "checkerboard.rectangle")
                             .rotationEffect(.degrees(90))
                             .font(.system(size: 16))
                             .frame(width: 44, height: 44)
-                            .background(camera.ditherEnabled ? Color.white : Color.clear)
-                            .foregroundColor(camera.ditherEnabled ? .black : .white)
+                            .background(isSelected ? Color.white : Color.clear)
+                            .foregroundColor(isSelected ? .black : .white)
                     }
                     .background(Color.white.opacity(0.2))
                     .cornerRadius(8)
+                    .opacity(camera.bitsPerPixel < 24 ? 1.0 : 0.5)
+                    .disabled(camera.bitsPerPixel >= 24)
                 }
                 .padding(.horizontal, 20)
                 
-                HStack {
-                    Text("\(1 << camera.bitsPerPixel) colors (\(paletteDescription))")
+                ZStack {
+                    Text(paletteDescription)
                         .foregroundColor(.gray)
                         .font(.system(size: 14))
                     
-                    Spacer()
-                    
-                    Text(camera.ditherEnabled ? "dithering on" : "dithering off")
-                        .foregroundColor(.gray)
-                        .font(.system(size: 14))
+                    HStack {
+                        Text("\(1 << camera.bitsPerPixel) colors")
+                            .foregroundColor(.gray)
+                            .font(.system(size: 14))
+                        
+                        Spacer()
+                        
+                        Text(camera.ditherEnabled && camera.bitsPerPixel < 24 ? "dithering on" : "dithering off")
+                            .foregroundColor(.gray)
+                            .font(.system(size: 14))
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, hasHomeButton ? 20 : 0)
@@ -269,7 +279,7 @@ struct ContentView: View {
     private func capture() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         pendingSavePixelBits = camera.bitsPerPixel
-        pendingSaveDither = camera.ditherEnabled
+        pendingSaveDither = camera.ditherEnabled && camera.bitsPerPixel < 24
         pendingSaveAdaptivePalette = camera.adaptivePaletteEnabled && camera.bitsPerPixel <= 8
         camera.capture()
         

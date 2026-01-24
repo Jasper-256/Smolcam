@@ -5,8 +5,8 @@ import CoreGraphics
 
 nonisolated func imageDataWithMetadata(_ cgImage: CGImage, pixelBits: Int, dither: Bool, adaptivePalette: Bool = false) -> Data? {
     let ditherStr = dither ? "dithering on" : "dithering off"
-    let paletteStr = adaptivePalette ? "adaptive" : "fixed"
-    let exifText = "Smolcam | \(pixelBits)-bit \(paletteStr) | \(ditherStr)"
+    let paletteStr = adaptivePalette ? " adaptive" : ""
+    let exifText = "Smolcam | \(pixelBits)-bit\(paletteStr) | \(ditherStr)"
     
     // Use indexed PNG for 8 bits or less (256 colors max)
     if pixelBits <= 8 {
