@@ -46,23 +46,6 @@ constant float bayer16x16[256] = {
     255,127,223, 95,247,119,215, 87,253,125,221, 93,245,117,213, 85,
 };
 
-// sRGB <-> Linear conversion functions for perceptually correct dithering
-inline float srgbToLinear(float c) {
-    return (c <= 0.04045) ? (c / 12.92) : pow((c + 0.055) / 1.055, 2.4);
-}
-
-inline float linearToSrgb(float c) {
-    return (c <= 0.0031308) ? (c * 12.92) : (1.055 * pow(c, 1.0/2.4) - 0.055);
-}
-
-inline float3 srgbToLinear3(float3 c) {
-    return float3(srgbToLinear(c.r), srgbToLinear(c.g), srgbToLinear(c.b));
-}
-
-inline float3 linearToSrgb3(float3 c) {
-    return float3(linearToSrgb(c.r), linearToSrgb(c.g), linearToSrgb(c.b));
-}
-
 kernel void ditherQuantize(
     texture2d<float, access::read> inTex [[texture(0)]],
     texture2d<float, access::write> outTex [[texture(1)]],
@@ -409,7 +392,6 @@ inline bool isTerminator(float3 color) {
 }
 
 // Build 32x32x32 LUT mapping each quantized RGB to up to 8 nearest palette colors
-// Distance calculations done in linear space for perceptually correct results
 // If palette has fewer than 8 colors, remaining slots are filled with terminator
 kernel void buildPaletteLUT(
     device PaletteLUTEntry *lut [[buffer(0)]],
@@ -422,20 +404,15 @@ kernel void buildPaletteLUT(
     // Convert linear index to RGB coordinates (same layout as histogram)
     float3 rgb = float3(tid % 32, (tid / 32) % 32, tid / 1024) / 31.0;
     
-    // Convert to linear space for distance calculations
-    float3 rgbLinear = srgbToLinear3(rgb);
-    
     // How many candidates can we actually store?
     int numCandidates = min(paletteSize / 2, 8);
     
-    // Find up to 8 nearest palette colors by distance in linear space
+    // Find up to 8 nearest palette colors by distance
     int indices[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     float distances[8] = {1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10, 1e10};
     
     for (int i = 0; i < paletteSize; i++) {
-        // Convert palette color to linear for comparison
-        float3 paletteLinear = srgbToLinear3(palette[i]);
-        float3 diff = rgbLinear - paletteLinear;
+        float3 diff = rgb - palette[i];
         float d = dot(diff, diff);
         
         // Insert into sorted list
@@ -514,17 +491,13 @@ kernel void applyAdaptivePalette(
         return;
     }
     
-    // Convert input to linear space for distance calculations
-    float3 rgbLinear = srgbToLinear3(rgb);
-    
     // Compute distances and weights only for valid candidates
     float weights[8];
     float totalWeight = 0.0;
     float softening = 0.01;  // Prevents division by zero and controls sharpness
     
     for (int i = 0; i < numColors; i++) {
-        float3 candLinear = srgbToLinear3(entry.colors[i]);
-        float3 diff = rgbLinear - candLinear;
+        float3 diff = rgb - entry.colors[i];
         float d = length(diff) + softening;
         weights[i] = 1.0 / (d * d);  // Inverse square weighting
         totalWeight += weights[i];
@@ -543,8 +516,8 @@ kernel void applyAdaptivePalette(
     }
     cumulative[numColors - 1] = 1.0;  // Ensure last valid entry is exactly 1.0
     
-    // Get Bayer threshold for this pixel
-    float threshold = bayer16x16[(gid.y % 16) * 16 + (gid.x % 16)] / 256.0;
+    // Get Bayer threshold for this pixel (0.9 factor reduces dither intensity)
+    float threshold = bayer16x16[(gid.y % 16) * 16 + (gid.x % 16)] / 256.0 * 0.9;
     
     // Select color based on where threshold falls in cumulative distribution
     int selected = 0;
