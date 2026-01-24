@@ -102,6 +102,23 @@ kernel void downsampleQuantize(
 constant int HIST_SIZE = 32;
 constant int HIST_TOTAL = HIST_SIZE * HIST_SIZE * HIST_SIZE;
 
+// Downsample image by 2x in each dimension for faster palette computation
+kernel void downsampleForPalette(
+    texture2d<float, access::read> inTex [[texture(0)]],
+    texture2d<float, access::write> outTex [[texture(1)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    if (gid.x >= outTex.get_width() || gid.y >= outTex.get_height()) return;
+    
+    // Average 2x2 block from input
+    uint2 base = gid * 2;
+    float3 sum = inTex.read(base).rgb
+               + inTex.read(base + uint2(1, 0)).rgb
+               + inTex.read(base + uint2(0, 1)).rgb
+               + inTex.read(base + uint2(1, 1)).rgb;
+    outTex.write(float4(sum / 4.0, 1.0), gid);
+}
+
 kernel void clearHistogram(device atomic_uint *histogram [[buffer(0)]], uint tid [[thread_position_in_grid]]) {
     if (tid < uint(HIST_TOTAL)) atomic_store_explicit(&histogram[tid], 0, memory_order_relaxed);
 }
@@ -130,12 +147,86 @@ kernel void initColorBox(device ColorBox *boxes [[buffer(0)]], device const uint
     boxes[0] = ColorBox{lo, hi, total, 0};
 }
 
-// Parallel median cut: each thread splits one box, doubling total count
-// At level L: boxes[0..2^L-1] exist, each thread tid splits boxes[tid] into boxes[tid] and boxes[tid + 2^L]
+// Parallel 3D prefix sum - split into 4 kernels for parallelization
+// Each pass runs 1024 threads in parallel instead of single-threaded
+
+// Step 1: Parallel copy histogram to prefix buffer (32K threads)
+kernel void prefixSumCopy(
+    device const uint *hist [[buffer(0)]],
+    device uint *prefix [[buffer(1)]],
+    uint tid [[thread_position_in_grid]]
+) {
+    if (tid < uint(HIST_TOTAL)) {
+        prefix[tid] = hist[tid];
+    }
+}
+
+// Step 2: Prefix sum along R axis - 1024 threads, each handles one (b,g) row
+kernel void prefixSumPassR(
+    device uint *prefix [[buffer(0)]],
+    uint tid [[thread_position_in_grid]]
+) {
+    if (tid >= 1024) return;
+    uint b = tid / 32;
+    uint g = tid % 32;
+    uint base = b * 1024 + g * 32;
+    for (uint r = 1; r < 32; r++) {
+        prefix[base + r] += prefix[base + r - 1];
+    }
+}
+
+// Step 3: Prefix sum along G axis - 1024 threads, each handles one (b,r) column
+kernel void prefixSumPassG(
+    device uint *prefix [[buffer(0)]],
+    uint tid [[thread_position_in_grid]]
+) {
+    if (tid >= 1024) return;
+    uint b = tid / 32;
+    uint r = tid % 32;
+    for (uint g = 1; g < 32; g++) {
+        prefix[b * 1024 + g * 32 + r] += prefix[b * 1024 + (g - 1) * 32 + r];
+    }
+}
+
+// Step 4: Prefix sum along B axis - 1024 threads, each handles one (g,r) depth
+kernel void prefixSumPassB(
+    device uint *prefix [[buffer(0)]],
+    uint tid [[thread_position_in_grid]]
+) {
+    if (tid >= 1024) return;
+    uint g = tid / 32;
+    uint r = tid % 32;
+    for (uint b = 1; b < 32; b++) {
+        prefix[b * 1024 + g * 32 + r] += prefix[(b - 1) * 1024 + g * 32 + r];
+    }
+}
+
+// Helper: query prefix sum, returns 0 for out-of-bounds (negative indices)
+inline uint queryPrefix(device const uint *prefix, int r, int g, int b) {
+    if (r < 0 || g < 0 || b < 0) return 0;
+    return prefix[b * 1024 + g * 32 + r];
+}
+
+// Query sum within a 3D box using inclusion-exclusion principle
+inline uint boxSum(device const uint *prefix, uint3 lo, uint3 hi) {
+    int r0 = int(lo.r) - 1, g0 = int(lo.g) - 1, b0 = int(lo.b) - 1;
+    int r1 = int(hi.r), g1 = int(hi.g), b1 = int(hi.b);
+    
+    return queryPrefix(prefix, r1, g1, b1)
+         - queryPrefix(prefix, r0, g1, b1)
+         - queryPrefix(prefix, r1, g0, b1)
+         - queryPrefix(prefix, r1, g1, b0)
+         + queryPrefix(prefix, r0, g0, b1)
+         + queryPrefix(prefix, r0, g1, b0)
+         + queryPrefix(prefix, r1, g0, b0)
+         - queryPrefix(prefix, r0, g0, b0);
+}
+
+// Parallel median cut using 3D prefix sum for O(1) box queries
 kernel void medianCutSplitParallel(
     device ColorBox *boxes [[buffer(0)]],
-    device const uint *hist [[buffer(1)]],
-    constant int &levelOffset [[buffer(2)]],  // 2^L (number of boxes before this split)
+    device const uint *prefix [[buffer(1)]],  // Now uses prefix sum instead of histogram
+    constant int &levelOffset [[buffer(2)]],
     uint tid [[thread_position_in_grid]]
 ) {
     if (tid >= uint(levelOffset)) return;
@@ -150,26 +241,36 @@ kernel void medianCutSplitParallel(
     
     // Can't split if range is 0
     if (axisMin >= axisMax) {
-        boxes[tid + levelOffset] = box;  // Duplicate
+        boxes[tid + levelOffset] = box;
         return;
     }
     
-    // Find median split point
-    uint halfCount = box.count / 2, cumCount = 0;
-    uint splitVal = axisMin;
+    // Find median split point using prefix sum queries
+    uint halfCount = box.count / 2;
+    uint splitVal = axisMin + 1;
     
-    for (uint v = axisMin; v < axisMax && cumCount < halfCount; v++) {
-        for (uint bb = box.minC.b; bb <= box.maxC.b; bb++) {
-            for (uint gg = box.minC.g; gg <= box.maxC.g; gg++) {
-                for (uint rr = box.minC.r; rr <= box.maxC.r; rr++) {
-                    uint checkVal = (axis == 0) ? rr : (axis == 1) ? gg : bb;
-                    if (checkVal == v) cumCount += hist[bb * 1024 + gg * 32 + rr];
-                }
-            }
+    // Binary search for the split point
+    uint lo = axisMin, hi = axisMax;
+    while (lo < hi) {
+        uint mid = (lo + hi) / 2;
+        
+        // Count pixels in box with axis value <= mid
+        uint3 queryLo = box.minC;
+        uint3 queryHi = box.maxC;
+        if (axis == 0) queryHi.r = mid;
+        else if (axis == 1) queryHi.g = mid;
+        else queryHi.b = mid;
+        
+        uint count = boxSum(prefix, queryLo, queryHi);
+        
+        if (count < halfCount) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
         }
-        if (cumCount < halfCount) splitVal = v + 1;
     }
-    splitVal = max(splitVal, axisMin + 1);
+    splitVal = max(lo, axisMin + 1);
+    if (splitVal > axisMax) splitVal = axisMax;
     
     // Create child boxes
     ColorBox box1 = box, box2 = box;
@@ -177,18 +278,12 @@ kernel void medianCutSplitParallel(
     else if (axis == 1) { box1.maxC.g = splitVal - 1; box2.minC.g = splitVal; }
     else { box1.maxC.b = splitVal - 1; box2.minC.b = splitVal; }
     
-    // Count pixels in each child
-    uint c1 = 0, c2 = 0;
-    for (uint bb = box.minC.b; bb <= box.maxC.b; bb++) {
-        for (uint gg = box.minC.g; gg <= box.maxC.g; gg++) {
-            for (uint rr = box.minC.r; rr <= box.maxC.r; rr++) {
-                uint cnt = hist[bb * 1024 + gg * 32 + rr];
-                uint cv = (axis == 0) ? rr : (axis == 1) ? gg : bb;
-                if (cv < splitVal) c1 += cnt; else c2 += cnt;
-            }
-        }
-    }
-    box1.count = c1; box2.count = c2;
+    // Count pixels in each child using prefix sum (O(1) each)
+    uint c1 = boxSum(prefix, box1.minC, box1.maxC);
+    uint c2 = boxSum(prefix, box2.minC, box2.maxC);
+    
+    box1.count = c1;
+    box2.count = c2;
     boxes[tid] = box1;
     boxes[tid + levelOffset] = box2;
 }
