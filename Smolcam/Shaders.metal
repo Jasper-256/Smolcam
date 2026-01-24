@@ -140,11 +140,24 @@ kernel void clearHistogram(device atomic_uint *histogram [[buffer(0)]], uint tid
     if (tid < uint(HIST_TOTAL)) atomic_store_explicit(&histogram[tid], 0, memory_order_relaxed);
 }
 
+// Build histogram with saturation weighting
+// Saturated colors get more weight so they're better represented in the palette,
+// even if they occupy a smaller portion of the image
 kernel void buildHistogram(texture2d<float, access::read> inTex [[texture(0)]], device atomic_uint *histogram [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= inTex.get_width() || gid.y >= inTex.get_height()) return;
     float4 c = inTex.read(gid);
+    
+    // Compute saturation (HSV model) for weighting
+    float maxC = max(c.r, max(c.g, c.b));
+    float minC = min(c.r, min(c.g, c.b));
+    float saturation = (maxC > 0.001) ? (maxC - minC) / maxC : 0.0;
+    
+    // Weight: base 1 + up to 3x boost for saturated colors
+    // Fully saturated colors get 4x weight, grays get 1x
+    uint weight = uint(1.0 + saturation * 3.0);
+    
     uint3 b = uint3(saturate(c.rgb) * float(HIST_SIZE - 1) + 0.5);
-    atomic_fetch_add_explicit(&histogram[min(b.b, 31u) * 1024 + min(b.g, 31u) * 32 + min(b.r, 31u)], 1, memory_order_relaxed);
+    atomic_fetch_add_explicit(&histogram[min(b.b, 31u) * 1024 + min(b.g, 31u) * 32 + min(b.r, 31u)], weight, memory_order_relaxed);
 }
 
 struct ColorBox { uint3 minC, maxC; uint count, pad; };
