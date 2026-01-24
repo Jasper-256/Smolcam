@@ -393,195 +393,159 @@ class CameraManager: NSObject, ObservableObject {
         }
         guard let dsTexture = downsampledTexture else { return nil }
         
-        let totalStart = CFAbsoluteTimeGetCurrent()
-        var stageStart: CFAbsoluteTime
-        
-        // Downsample input for palette computation (4x reduction)
-        stageStart = CFAbsoluteTimeGetCurrent()
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(downsampleForPalettePipeline)
-            enc.setTexture(inTexture, index: 0)
-            enc.setTexture(dsTexture, index: 1)
-            enc.dispatchThreadgroups(dsTgCount, threadsPerThreadgroup: tgSize)
-            enc.endEncoding()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-        }
-        let downsampleTime = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
-        
-        // Clear histogram
-        stageStart = CFAbsoluteTimeGetCurrent()
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(clearHistogramPipeline)
-            enc.setBuffer(histogramBuffer, offset: 0, index: 0)
-            enc.dispatchThreads(MTLSize(width: histogramSize, height: 1, depth: 1),
-                               threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
-            enc.endEncoding()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-        }
-        let clearHistTime = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
-        
-        // Build histogram from downsampled texture (16x fewer pixels)
-        stageStart = CFAbsoluteTimeGetCurrent()
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(buildHistogramPipeline)
-            enc.setTexture(dsTexture, index: 0)
-            enc.setBuffer(histogramBuffer, offset: 0, index: 0)
-            enc.dispatchThreadgroups(dsTgCount, threadsPerThreadgroup: tgSize)
-            enc.endEncoding()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-        }
-        let buildHistTime = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
-        
-        // Build 3D prefix sum from histogram (4 parallel passes)
-        stageStart = CFAbsoluteTimeGetCurrent()
-        
-        // Pass 1: Copy histogram to prefix buffer (32K threads)
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(prefixSumCopyPipeline)
-            enc.setBuffer(histogramBuffer, offset: 0, index: 0)
-            enc.setBuffer(prefixSumBuffer, offset: 0, index: 1)
-            enc.dispatchThreads(MTLSize(width: histogramSize, height: 1, depth: 1),
-                               threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
-            enc.endEncoding()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-        }
-        
-        // Pass 2: Prefix sum along R axis (1024 threads)
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(prefixSumPassRPipeline)
-            enc.setBuffer(prefixSumBuffer, offset: 0, index: 0)
-            enc.dispatchThreads(MTLSize(width: 1024, height: 1, depth: 1),
-                               threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
-            enc.endEncoding()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-        }
-        
-        // Pass 3: Prefix sum along G axis (1024 threads)
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(prefixSumPassGPipeline)
-            enc.setBuffer(prefixSumBuffer, offset: 0, index: 0)
-            enc.dispatchThreads(MTLSize(width: 1024, height: 1, depth: 1),
-                               threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
-            enc.endEncoding()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-        }
-        
-        // Pass 4: Prefix sum along B axis (1024 threads)
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(prefixSumPassBPipeline)
-            enc.setBuffer(prefixSumBuffer, offset: 0, index: 0)
-            enc.dispatchThreads(MTLSize(width: 1024, height: 1, depth: 1),
-                               threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
-            enc.endEncoding()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-        }
-        
-        let prefixSumTime = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
-        
-        // Initialize first color box
-        stageStart = CFAbsoluteTimeGetCurrent()
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(initColorBoxPipeline)
-            enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
-            enc.setBuffer(histogramBuffer, offset: 0, index: 1)
-            enc.dispatchThreads(MTLSize(width: 1, height: 1, depth: 1),
-                               threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
-            enc.endEncoding()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-        }
-        let initBoxTime = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
-        
-        // Parallel median cut using prefix sum for O(1) box queries
-        stageStart = CFAbsoluteTimeGetCurrent()
-        var levelOffset: Int32 = 1
-        while levelOffset < Int32(paletteSize) {
-            if let cmdBuffer = commandQueue.makeCommandBuffer(),
-               let enc = cmdBuffer.makeComputeCommandEncoder() {
-                enc.setComputePipelineState(medianCutSplitParallelPipeline)
-                enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
-                enc.setBuffer(prefixSumBuffer, offset: 0, index: 1)  // Use prefix sum instead of histogram
-                enc.setBytes(&levelOffset, length: 4, index: 2)
-                enc.dispatchThreads(MTLSize(width: Int(levelOffset), height: 1, depth: 1),
-                                   threadsPerThreadgroup: MTLSize(width: min(Int(levelOffset), 256), height: 1, depth: 1))
-                enc.endEncoding()
-                cmdBuffer.commit()
-                cmdBuffer.waitUntilCompleted()
-            }
-            levelOffset *= 2
-        }
-        let medianCutTime = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
-        
-        // Compute palette colors
-        stageStart = CFAbsoluteTimeGetCurrent()
         var paletteSizeVal = Int32(paletteSize)
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(computePaletteColorsPipeline)
-            enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
-            enc.setBuffer(histogramBuffer, offset: 0, index: 1)
-            enc.setBuffer(paletteBuffer, offset: 0, index: 2)
-            enc.setBytes(&paletteSizeVal, length: 4, index: 3)
-            enc.dispatchThreads(MTLSize(width: paletteSize, height: 1, depth: 1),
-                               threadsPerThreadgroup: MTLSize(width: min(paletteSize, 256), height: 1, depth: 1))
-            enc.endEncoding()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-        }
-        let computePaletteTime = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
-        
-        // Build LUT: maps each 32x32x32 RGB bin to nearest/second-nearest palette colors
-        stageStart = CFAbsoluteTimeGetCurrent()
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(buildPaletteLUTPipeline)
-            enc.setBuffer(paletteLUTBuffer, offset: 0, index: 0)
-            enc.setBuffer(paletteBuffer, offset: 0, index: 1)
-            enc.setBytes(&paletteSizeVal, length: 4, index: 2)
-            enc.dispatchThreads(MTLSize(width: histogramSize, height: 1, depth: 1),
-                               threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
-            enc.endEncoding()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-        }
-        let buildLUTTime = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
-        
-        // Apply palette using LUT lookup
-        stageStart = CFAbsoluteTimeGetCurrent()
         var ditherVal: Int32 = dither ? 1 : 0
-        if let cmdBuffer = commandQueue.makeCommandBuffer(),
-           let enc = cmdBuffer.makeComputeCommandEncoder() {
-            enc.setComputePipelineState(applyAdaptivePalettePipeline)
-            enc.setTexture(inTexture, index: 0)
-            enc.setTexture(outTexture, index: 1)
-            enc.setBuffer(paletteLUTBuffer, offset: 0, index: 0)
-            enc.setBytes(&ditherVal, length: 4, index: 1)
-            enc.dispatchThreadgroups(tgCount, threadsPerThreadgroup: tgSize)
-            enc.endEncoding()
+        
+        // ========== BATCH A: Downsample + Clear + Build Histogram ==========
+        if let cmdBuffer = commandQueue.makeCommandBuffer() {
+            // Downsample input for palette computation (4x reduction)
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(downsampleForPalettePipeline)
+                enc.setTexture(inTexture, index: 0)
+                enc.setTexture(dsTexture, index: 1)
+                enc.dispatchThreadgroups(dsTgCount, threadsPerThreadgroup: tgSize)
+                enc.endEncoding()
+            }
+            
+            // Clear histogram using blit encoder (faster than compute)
+            if let blitEnc = cmdBuffer.makeBlitCommandEncoder() {
+                blitEnc.fill(buffer: histogramBuffer, range: 0..<histogramBuffer.length, value: 0)
+                blitEnc.endEncoding()
+            }
+            
+            // Build histogram from downsampled texture
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(buildHistogramPipeline)
+                enc.setTexture(dsTexture, index: 0)
+                enc.setBuffer(histogramBuffer, offset: 0, index: 0)
+                enc.dispatchThreadgroups(dsTgCount, threadsPerThreadgroup: tgSize)
+                enc.endEncoding()
+            }
+            
             cmdBuffer.commit()
             cmdBuffer.waitUntilCompleted()
         }
-        let applyPaletteTime = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
         
-        let totalTime = (CFAbsoluteTimeGetCurrent() - totalStart) * 1000
+        // ========== BATCH B: Prefix Sum (4 passes with memory barriers) ==========
+        if let cmdBuffer = commandQueue.makeCommandBuffer() {
+            // Pass 1: Copy histogram to prefix buffer
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(prefixSumCopyPipeline)
+                enc.setBuffer(histogramBuffer, offset: 0, index: 0)
+                enc.setBuffer(prefixSumBuffer, offset: 0, index: 1)
+                enc.dispatchThreads(MTLSize(width: histogramSize, height: 1, depth: 1),
+                                   threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+                enc.memoryBarrier(scope: .buffers)
+                enc.endEncoding()
+            }
+            
+            // Pass 2: Prefix sum along R axis
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(prefixSumPassRPipeline)
+                enc.setBuffer(prefixSumBuffer, offset: 0, index: 0)
+                enc.dispatchThreads(MTLSize(width: 1024, height: 1, depth: 1),
+                                   threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+                enc.memoryBarrier(scope: .buffers)
+                enc.endEncoding()
+            }
+            
+            // Pass 3: Prefix sum along G axis
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(prefixSumPassGPipeline)
+                enc.setBuffer(prefixSumBuffer, offset: 0, index: 0)
+                enc.dispatchThreads(MTLSize(width: 1024, height: 1, depth: 1),
+                                   threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+                enc.memoryBarrier(scope: .buffers)
+                enc.endEncoding()
+            }
+            
+            // Pass 4: Prefix sum along B axis
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(prefixSumPassBPipeline)
+                enc.setBuffer(prefixSumBuffer, offset: 0, index: 0)
+                enc.dispatchThreads(MTLSize(width: 1024, height: 1, depth: 1),
+                                   threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+                enc.endEncoding()
+            }
+            
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+        }
         
-        print(String(format: "[AdaptivePalette] ds=%.2fms clear=%.2fms hist=%.2fms prefix=%.2fms init=%.2fms median=%.2fms palette=%.2fms LUT=%.2fms apply=%.2fms | TOTAL=%.2fms",
-                     downsampleTime, clearHistTime, buildHistTime, prefixSumTime, initBoxTime, medianCutTime, computePaletteTime, buildLUTTime, applyPaletteTime, totalTime))
+        // ========== BATCH C: Init Color Box + Median Cut ==========
+        if let cmdBuffer = commandQueue.makeCommandBuffer() {
+            // Initialize first color box
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(initColorBoxPipeline)
+                enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
+                enc.setBuffer(histogramBuffer, offset: 0, index: 1)
+                enc.dispatchThreads(MTLSize(width: 1, height: 1, depth: 1),
+                                   threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
+                enc.memoryBarrier(scope: .buffers)
+                enc.endEncoding()
+            }
+            
+            // Parallel median cut - all iterations in one command buffer
+            var levelOffset: Int32 = 1
+            while levelOffset < Int32(paletteSize) {
+                if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                    enc.setComputePipelineState(medianCutSplitParallelPipeline)
+                    enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
+                    enc.setBuffer(prefixSumBuffer, offset: 0, index: 1)
+                    enc.setBytes(&levelOffset, length: 4, index: 2)
+                    enc.dispatchThreads(MTLSize(width: Int(levelOffset), height: 1, depth: 1),
+                                       threadsPerThreadgroup: MTLSize(width: min(Int(levelOffset), 256), height: 1, depth: 1))
+                    enc.memoryBarrier(scope: .buffers)
+                    enc.endEncoding()
+                }
+                levelOffset *= 2
+            }
+            
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+        }
+        
+        // ========== BATCH D: Compute Palette + Build LUT + Apply ==========
+        if let cmdBuffer = commandQueue.makeCommandBuffer() {
+            // Compute palette colors
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(computePaletteColorsPipeline)
+                enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
+                enc.setBuffer(histogramBuffer, offset: 0, index: 1)
+                enc.setBuffer(paletteBuffer, offset: 0, index: 2)
+                enc.setBytes(&paletteSizeVal, length: 4, index: 3)
+                enc.dispatchThreads(MTLSize(width: paletteSize, height: 1, depth: 1),
+                                   threadsPerThreadgroup: MTLSize(width: min(paletteSize, 256), height: 1, depth: 1))
+                enc.memoryBarrier(scope: .buffers)
+                enc.endEncoding()
+            }
+            
+            // Build LUT
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(buildPaletteLUTPipeline)
+                enc.setBuffer(paletteLUTBuffer, offset: 0, index: 0)
+                enc.setBuffer(paletteBuffer, offset: 0, index: 1)
+                enc.setBytes(&paletteSizeVal, length: 4, index: 2)
+                enc.dispatchThreads(MTLSize(width: histogramSize, height: 1, depth: 1),
+                                   threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+                enc.memoryBarrier(scope: .buffers)
+                enc.endEncoding()
+            }
+            
+            // Apply palette using LUT lookup
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(applyAdaptivePalettePipeline)
+                enc.setTexture(inTexture, index: 0)
+                enc.setTexture(outTexture, index: 1)
+                enc.setBuffer(paletteLUTBuffer, offset: 0, index: 0)
+                enc.setBytes(&ditherVal, length: 4, index: 1)
+                enc.dispatchThreadgroups(tgCount, threadsPerThreadgroup: tgSize)
+                enc.endEncoding()
+            }
+            
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+        }
         
         return outTexture
     }
