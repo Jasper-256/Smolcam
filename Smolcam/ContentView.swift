@@ -40,32 +40,6 @@ struct ContentView: View {
     @State private var pendingSaveDither: Bool?
     @State private var pendingSaveUseBlueNoise: Bool?
     
-    private var ditherButtonEnabled: Bool {
-        camera.bitsPerPixel != 24
-    }
-    
-    private var ditherIcon: String {
-        if camera.bitsPerPixel == 24 || !camera.ditherEnabled {
-            return "circle.slash"
-        } else if camera.useBlueNoise {
-            return "aqi.medium"
-        } else {
-            return "checkerboard.rectangle"
-        }
-    }
-    
-    private func cycleDitherMode() {
-        if !camera.ditherEnabled {
-            camera.ditherEnabled = true
-            camera.useBlueNoise = false
-        } else if !camera.useBlueNoise {
-            camera.useBlueNoise = true
-        } else {
-            camera.ditherEnabled = false
-            camera.useBlueNoise = false
-        }
-    }
-    
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -142,36 +116,56 @@ struct ContentView: View {
                     .background(Color.white.opacity(0.2))
                     .cornerRadius(8)
                     
-                    Button { cycleDitherMode() } label: {
-                        Image(systemName: ditherIcon)
-                            .rotationEffect(ditherIcon == "checkerboard.rectangle" ? .degrees(90) : .degrees(0))
-                            .font(.system(size: 16))
-                            .frame(width: 44, height: 44)
-                            .foregroundColor(ditherButtonEnabled ? .white : .gray)
-                            .animation(nil, value: camera.ditherEnabled)
-                            .animation(nil, value: camera.useBlueNoise)
-                            .animation(nil, value: camera.bitsPerPixel)
+                    HStack(spacing: 0) {
+                        Button {
+                            camera.ditherEnabled = false
+                            camera.useBlueNoise = false
+                        } label: {
+                            Image(systemName: "circle.slash")
+                                .font(.system(size: 16))
+                                .frame(width: 44, height: 44)
+                                .background(!camera.ditherEnabled ? Color.white : Color.clear)
+                                .foregroundColor(!camera.ditherEnabled ? .black : .white)
+                        }
+                        
+                        Button {
+                            camera.ditherEnabled = true
+                            camera.useBlueNoise = false
+                        } label: {
+                            Image(systemName: "checkerboard.rectangle")
+                                .rotationEffect(.degrees(90))
+                                .font(.system(size: 16))
+                                .frame(width: 44, height: 44)
+                                .background(camera.ditherEnabled && !camera.useBlueNoise ? Color.white : Color.clear)
+                                .foregroundColor(camera.ditherEnabled && !camera.useBlueNoise ? .black : .white)
+                        }
+                        
+                        Button {
+                            camera.ditherEnabled = true
+                            camera.useBlueNoise = true
+                        } label: {
+                            Image(systemName: "aqi.medium")
+                                .font(.system(size: 16))
+                                .frame(width: 44, height: 44)
+                                .background(camera.ditherEnabled && camera.useBlueNoise ? Color.white : Color.clear)
+                                .foregroundColor(camera.ditherEnabled && camera.useBlueNoise ? .black : .white)
+                        }
                     }
-                    .disabled(!ditherButtonEnabled)
-                    .background(Color.white.opacity(ditherButtonEnabled ? 0.2 : 0.1))
+                    .background(Color.white.opacity(0.2))
                     .cornerRadius(8)
                 }
                 .padding(.horizontal, 20)
                 
                 HStack {
-                    Text("\(1 << camera.bitsPerPixel) colors")
-                        .foregroundColor(.gray)
-                        .font(.system(size: 14))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    Text(colorFormatName(camera.bitsPerPixel))
+                    Text("\(1 << camera.bitsPerPixel) colors (\(colorFormatName(camera.bitsPerPixel)))")
                         .foregroundColor(.gray)
                         .font(.system(size: 14))
                     
-                    Text(!camera.ditherEnabled || camera.bitsPerPixel == 24 ? "no dither" : (camera.useBlueNoise ? "blue noise dither" : "bayer dither"))
+                    Spacer()
+                    
+                    Text(!camera.ditherEnabled ? "no dither" : (camera.useBlueNoise ? "blue noise dither" : "bayer dither"))
                         .foregroundColor(.gray)
                         .font(.system(size: 14))
-                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, hasHomeButton ? 20 : 0)
@@ -283,7 +277,7 @@ struct ContentView: View {
     private func capture() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         pendingSavePixelBits = camera.bitsPerPixel
-        pendingSaveDither = camera.ditherEnabled && camera.bitsPerPixel != 24
+        pendingSaveDither = camera.ditherEnabled
         pendingSaveUseBlueNoise = camera.useBlueNoise
         camera.capture()
         
