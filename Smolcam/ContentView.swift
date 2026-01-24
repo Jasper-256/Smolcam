@@ -113,7 +113,7 @@ struct ContentView: View {
                                 Button { camera.bitsPerPixel = n } label: {
                                     Text("\(n)")
                                         .font(.system(size: 16, weight: camera.bitsPerPixel == n ? .bold : .regular))
-                                        .frame(maxWidth: .infinity, minHeight: 44)
+                                        .frame(maxWidth: .infinity, minHeight: 42)
                                         .background(camera.bitsPerPixel == n ? Color.white : Color.clear)
                                         .foregroundColor(camera.bitsPerPixel == n ? .black : .white)
                                 }
@@ -129,7 +129,7 @@ struct ContentView: View {
                             } label: {
                                 Image(systemName: "circle.slash")
                                     .font(.system(size: 16))
-                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .frame(maxWidth: .infinity, minHeight: 42)
                                     .background(camera.ditherMode == 0 ? Color.white : Color.clear)
                                     .foregroundColor(camera.ditherMode == 0 ? .black : .white)
                             }
@@ -140,7 +140,7 @@ struct ContentView: View {
                                 Image(systemName: "checkerboard.rectangle")
                                     .rotationEffect(.degrees(90))
                                     .font(.system(size: 16))
-                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .frame(maxWidth: .infinity, minHeight: 42)
                                     .background(camera.ditherMode == 1 ? Color.white : Color.clear)
                                     .foregroundColor(camera.ditherMode == 1 ? .black : .white)
                             }
@@ -150,7 +150,7 @@ struct ContentView: View {
                             } label: {
                                 Image(systemName: "aqi.medium")
                                     .font(.system(size: 16))
-                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .frame(maxWidth: .infinity, minHeight: 42)
                                     .background(camera.ditherMode == 2 ? Color.white : Color.clear)
                                     .foregroundColor(camera.ditherMode == 2 ? .black : .white)
                             }
@@ -160,8 +160,9 @@ struct ContentView: View {
                         .cornerRadius(8)
                     }
                 }
-                .frame(height: 44)
+                .frame(height: 42)
                 .padding(.horizontal, 20)
+                .padding(.bottom, -4)
                 
                 HStack {
                     Text("\(1 << camera.bitsPerPixel) colors (\(colorFormatName(camera.bitsPerPixel)))")
