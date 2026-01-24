@@ -36,7 +36,6 @@ class CameraManager: NSObject, ObservableObject {
     private var captureOrientation: UIImage.Orientation = .up
     private var captureIsFront = false
     
-    // Metal
     let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let computePipeline: MTLComputePipelineState
@@ -45,7 +44,6 @@ class CameraManager: NSObject, ObservableObject {
     private let textureCache: CVMetalTextureCache
     private var processedTexture: MTLTexture?
     
-    // For MTKView rendering
     weak var metalView: MTKView?
     private var currentTexture: MTLTexture?
     private let textureLock = NSLock()

@@ -48,7 +48,7 @@ struct ContentView: View {
         if camera.bitsPerPixel == 24 || !camera.ditherEnabled {
             return "circle.slash"
         } else if camera.useBlueNoise {
-            return "snowflake"
+            return "aqi.medium"
         } else {
             return "checkerboard.rectangle"
         }
@@ -56,14 +56,11 @@ struct ContentView: View {
     
     private func cycleDitherMode() {
         if !camera.ditherEnabled {
-            // off -> bayer
             camera.ditherEnabled = true
             camera.useBlueNoise = false
         } else if !camera.useBlueNoise {
-            // bayer -> blue noise
             camera.useBlueNoise = true
         } else {
-            // blue noise -> off
             camera.ditherEnabled = false
             camera.useBlueNoise = false
         }
