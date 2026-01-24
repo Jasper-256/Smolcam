@@ -120,24 +120,29 @@ struct ContentView: View {
                             .rotationEffect(.degrees(90))
                             .font(.system(size: 16))
                             .frame(width: 44, height: 44)
-                            .background(camera.ditherEnabled ? Color.white : Color.clear)
-                            .foregroundColor(camera.ditherEnabled ? .black : .white)
+                            .background(camera.ditherEnabled && camera.bitsPerPixel != 24 ? Color.white : Color.clear)
+                            .foregroundColor(camera.bitsPerPixel == 24 ? .gray : (camera.ditherEnabled ? .black : .white))
                     }
+                    .disabled(camera.bitsPerPixel == 24)
                     .background(Color.white.opacity(0.2))
                     .cornerRadius(8)
                 }
                 .padding(.horizontal, 20)
                 
                 HStack {
-                    Text("\(1 << camera.bitsPerPixel) colors (\(colorFormatName(camera.bitsPerPixel)))")
+                    Text("\(1 << camera.bitsPerPixel) colors")
+                        .foregroundColor(.gray)
+                        .font(.system(size: 14))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Text(colorFormatName(camera.bitsPerPixel))
                         .foregroundColor(.gray)
                         .font(.system(size: 14))
                     
-                    Spacer()
-                    
-                    Text(camera.ditherEnabled ? "dithering on" : "dithering off")
+                    Text(camera.ditherEnabled && camera.bitsPerPixel != 24 ? "dither on" : "dither off")
                         .foregroundColor(.gray)
                         .font(.system(size: 14))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, hasHomeButton ? 20 : 0)
@@ -247,7 +252,7 @@ struct ContentView: View {
     private func capture() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         pendingSavePixelBits = camera.bitsPerPixel
-        pendingSaveDither = camera.ditherEnabled
+        pendingSaveDither = camera.ditherEnabled && camera.bitsPerPixel != 24
         camera.capture()
         
         withAnimation(.easeInOut(duration: 0.2)) {

@@ -4,7 +4,7 @@ import Compression
 import CoreGraphics
 
 nonisolated func imageDataWithMetadata(_ cgImage: CGImage, pixelBits: Int, dither: Bool) -> Data? {
-    let ditherStr = dither ? "dithering on" : "dithering off"
+    let ditherStr = dither ? "dither on" : "dither off"
     let exifText = "Smolcam | \(pixelBits)-bit | \(ditherStr)"
     
     // Use indexed PNG for 8 bits or less (256 colors max)

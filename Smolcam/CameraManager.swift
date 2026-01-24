@@ -376,7 +376,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
         let bits = bitsPerPixel
-        let dither = ditherEnabled
+        let dither = ditherEnabled && bits != 24
         let capture = shouldCapture
         
         guard let texture = processToTexture(pb, bits: bits, dither: dither) else { return }
