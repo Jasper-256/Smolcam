@@ -96,3 +96,202 @@ kernel void downsampleQuantize(
 
     outTex.write(float4(quantized, 1.0), gid);
 }
+
+// MARK: - Adaptive Palette Shaders
+
+constant int HIST_SIZE = 32;
+constant int HIST_TOTAL = HIST_SIZE * HIST_SIZE * HIST_SIZE;
+
+kernel void clearHistogram(device atomic_uint *histogram [[buffer(0)]], uint tid [[thread_position_in_grid]]) {
+    if (tid < uint(HIST_TOTAL)) atomic_store_explicit(&histogram[tid], 0, memory_order_relaxed);
+}
+
+kernel void buildHistogram(texture2d<float, access::read> inTex [[texture(0)]], device atomic_uint *histogram [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= inTex.get_width() || gid.y >= inTex.get_height()) return;
+    float4 c = inTex.read(gid);
+    uint3 b = uint3(saturate(c.rgb) * float(HIST_SIZE - 1) + 0.5);
+    atomic_fetch_add_explicit(&histogram[min(b.b, 31u) * 1024 + min(b.g, 31u) * 32 + min(b.r, 31u)], 1, memory_order_relaxed);
+}
+
+struct ColorBox { uint3 minC, maxC; uint count, pad; };
+
+// Initialize first box covering all colors
+kernel void initColorBox(device ColorBox *boxes [[buffer(0)]], device const uint *hist [[buffer(1)]]) {
+    uint3 lo = uint3(63), hi = uint3(0);
+    uint total = 0;
+    for (uint i = 0; i < HIST_TOTAL; i++) {
+        uint c = hist[i];
+        if (c > 0) {
+            uint3 p = uint3(i % 32, (i / 32) % 32, i / 1024);
+            lo = min(lo, p); hi = max(hi, p);
+            total += c;
+        }
+    }
+    boxes[0] = ColorBox{lo, hi, total, 0};
+}
+
+// Parallel median cut: each thread splits one box, doubling total count
+// At level L: boxes[0..2^L-1] exist, each thread tid splits boxes[tid] into boxes[tid] and boxes[tid + 2^L]
+kernel void medianCutSplitParallel(
+    device ColorBox *boxes [[buffer(0)]],
+    device const uint *hist [[buffer(1)]],
+    constant int &levelOffset [[buffer(2)]],  // 2^L (number of boxes before this split)
+    uint tid [[thread_position_in_grid]]
+) {
+    if (tid >= uint(levelOffset)) return;
+    
+    ColorBox box = boxes[tid];
+    uint3 range = box.maxC - box.minC;
+    
+    // Find longest axis
+    int axis = (range.g > range.r && range.g >= range.b) ? 1 : (range.b > range.r && range.b > range.g) ? 2 : 0;
+    uint axisMin = (axis == 0) ? box.minC.r : (axis == 1) ? box.minC.g : box.minC.b;
+    uint axisMax = (axis == 0) ? box.maxC.r : (axis == 1) ? box.maxC.g : box.maxC.b;
+    
+    // Can't split if range is 0
+    if (axisMin >= axisMax) {
+        boxes[tid + levelOffset] = box;  // Duplicate
+        return;
+    }
+    
+    // Find median split point
+    uint halfCount = box.count / 2, cumCount = 0;
+    uint splitVal = axisMin;
+    
+    for (uint v = axisMin; v < axisMax && cumCount < halfCount; v++) {
+        for (uint bb = box.minC.b; bb <= box.maxC.b; bb++) {
+            for (uint gg = box.minC.g; gg <= box.maxC.g; gg++) {
+                for (uint rr = box.minC.r; rr <= box.maxC.r; rr++) {
+                    uint checkVal = (axis == 0) ? rr : (axis == 1) ? gg : bb;
+                    if (checkVal == v) cumCount += hist[bb * 1024 + gg * 32 + rr];
+                }
+            }
+        }
+        if (cumCount < halfCount) splitVal = v + 1;
+    }
+    splitVal = max(splitVal, axisMin + 1);
+    
+    // Create child boxes
+    ColorBox box1 = box, box2 = box;
+    if (axis == 0) { box1.maxC.r = splitVal - 1; box2.minC.r = splitVal; }
+    else if (axis == 1) { box1.maxC.g = splitVal - 1; box2.minC.g = splitVal; }
+    else { box1.maxC.b = splitVal - 1; box2.minC.b = splitVal; }
+    
+    // Count pixels in each child
+    uint c1 = 0, c2 = 0;
+    for (uint bb = box.minC.b; bb <= box.maxC.b; bb++) {
+        for (uint gg = box.minC.g; gg <= box.maxC.g; gg++) {
+            for (uint rr = box.minC.r; rr <= box.maxC.r; rr++) {
+                uint cnt = hist[bb * 1024 + gg * 32 + rr];
+                uint cv = (axis == 0) ? rr : (axis == 1) ? gg : bb;
+                if (cv < splitVal) c1 += cnt; else c2 += cnt;
+            }
+        }
+    }
+    box1.count = c1; box2.count = c2;
+    boxes[tid] = box1;
+    boxes[tid + levelOffset] = box2;
+}
+
+// Compute palette color for each box
+kernel void computePaletteColors(
+    device const ColorBox *boxes [[buffer(0)]],
+    device const uint *hist [[buffer(1)]],
+    device float3 *palette [[buffer(2)]],
+    constant int &numColors [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]
+) {
+    if (tid >= uint(numColors)) return;
+    ColorBox box = boxes[tid];
+    
+    float3 sum = float3(0);
+    uint total = 0;
+    for (uint b = box.minC.b; b <= box.maxC.b; b++) {
+        for (uint g = box.minC.g; g <= box.maxC.g; g++) {
+            for (uint r = box.minC.r; r <= box.maxC.r; r++) {
+                uint c = hist[b * 1024 + g * 32 + r];
+                if (c > 0) { sum += float3(r, g, b) * float(c); total += c; }
+            }
+        }
+    }
+    palette[tid] = (total > 0) ? sum / float(total * 31) : float3(box.minC + box.maxC) / 62.0;
+}
+
+// LUT entry: stores nearest and second-nearest palette colors directly
+struct PaletteLUTEntry {
+    float3 nearest;
+    float3 secondNearest;
+};
+
+// Build 32x32x32 LUT mapping each quantized RGB to nearest/second-nearest palette colors
+kernel void buildPaletteLUT(
+    device PaletteLUTEntry *lut [[buffer(0)]],
+    device const float3 *palette [[buffer(1)]],
+    constant int &paletteSize [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]
+) {
+    if (tid >= uint(HIST_TOTAL)) return;
+    
+    // Convert linear index to RGB coordinates (same layout as histogram)
+    float3 rgb = float3(tid % 32, (tid / 32) % 32, tid / 1024) / 31.0;
+    
+    // Find nearest and second-nearest palette colors
+    int nearestIdx = 0, secondIdx = 0;
+    float minDist = 1e10, secondDist = 1e10;
+    
+    for (int i = 0; i < paletteSize; i++) {
+        float3 diff = rgb - palette[i];
+        float d = dot(diff, diff);
+        if (d < minDist) {
+            secondDist = minDist;
+            secondIdx = nearestIdx;
+            minDist = d;
+            nearestIdx = i;
+        } else if (d < secondDist) {
+            secondDist = d;
+            secondIdx = i;
+        }
+    }
+    
+    lut[tid].nearest = palette[nearestIdx];
+    lut[tid].secondNearest = palette[secondIdx];
+}
+
+// Apply palette with dithering using LUT lookup (optimized version)
+kernel void applyAdaptivePalette(
+    texture2d<float, access::read> inTex [[texture(0)]],
+    texture2d<float, access::write> outTex [[texture(1)]],
+    device const PaletteLUTEntry *lut [[buffer(0)]],
+    constant int &dither [[buffer(1)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    if (gid.x >= inTex.get_width() || gid.y >= inTex.get_height()) return;
+    
+    float3 rgb = inTex.read(gid).rgb;
+    
+    // Quantize to 32x32x32 LUT coordinates
+    uint3 lutCoord = uint3(saturate(rgb) * 31.0 + 0.5);
+    lutCoord = min(lutCoord, uint3(31));
+    uint lutIdx = lutCoord.b * 1024 + lutCoord.g * 32 + lutCoord.r;
+    
+    // Lookup nearest and second-nearest colors from LUT
+    PaletteLUTEntry entry = lut[lutIdx];
+    float3 nearest = entry.nearest;
+    float3 secondNearest = entry.secondNearest;
+    
+    float3 result = nearest;
+    if (dither != 0) {
+        // Compute actual distances for dithering threshold
+        float3 diff1 = rgb - nearest;
+        float3 diff2 = rgb - secondNearest;
+        float minDist = dot(diff1, diff1);
+        float secondDist = dot(diff2, diff2);
+        
+        if (minDist > 0.0004) {  // ~0.02^2
+            float t = minDist / (minDist + secondDist);
+            if (bayer16x16[(gid.y % 16) * 16 + (gid.x % 16)] / 256.0 < t)
+                result = secondNearest;
+        }
+    }
+    outTex.write(float4(result, 1.0), gid);
+}

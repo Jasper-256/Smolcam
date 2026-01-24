@@ -38,6 +38,7 @@ struct ContentView: View {
     @State private var lastMag: CGFloat = 0
     @State private var pendingSavePixelBits: Int?
     @State private var pendingSaveDither: Bool?
+    @State private var pendingSaveAdaptivePalette: Bool?
     
     var body: some View {
         ZStack {
@@ -115,6 +116,18 @@ struct ContentView: View {
                     .background(Color.white.opacity(0.2))
                     .cornerRadius(8)
                     
+                    Button { camera.adaptivePaletteEnabled.toggle() } label: {
+                        Image(systemName: "paintpalette")
+                            .font(.system(size: 16))
+                            .frame(width: 44, height: 44)
+                            .background(camera.adaptivePaletteEnabled ? Color.white : Color.clear)
+                            .foregroundColor(camera.adaptivePaletteEnabled ? .black : .white)
+                    }
+                    .background(Color.white.opacity(0.2))
+                    .cornerRadius(8)
+                    .opacity(camera.bitsPerPixel <= 8 ? 1.0 : 0.5)
+                    .disabled(camera.bitsPerPixel > 8)
+                    
                     Button { camera.ditherEnabled.toggle() } label: {
                         Image(systemName: "checkerboard.rectangle")
                             .rotationEffect(.degrees(90))
@@ -129,7 +142,7 @@ struct ContentView: View {
                 .padding(.horizontal, 20)
                 
                 HStack {
-                    Text("\(1 << camera.bitsPerPixel) colors (\(colorFormatName(camera.bitsPerPixel)))")
+                    Text("\(1 << camera.bitsPerPixel) colors (\(paletteDescription))")
                         .foregroundColor(.gray)
                         .font(.system(size: 14))
                     
@@ -156,11 +169,13 @@ struct ContentView: View {
             guard let img = newImage,
                   let cgImage = img.cgImage,
                   let pixelBits = pendingSavePixelBits,
-                  let dither = pendingSaveDither else { return }
+                  let dither = pendingSaveDither,
+                  let adaptivePalette = pendingSaveAdaptivePalette else { return }
             pendingSavePixelBits = nil
             pendingSaveDither = nil
+            pendingSaveAdaptivePalette = nil
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, dither: dither) else { return }
+                guard let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, dither: dither, adaptivePalette: adaptivePalette) else { return }
                 Task {
                     try? await PHPhotoLibrary.shared().performChanges {
                         let request = PHAssetCreationRequest.forAsset()
@@ -169,6 +184,13 @@ struct ContentView: View {
                 }
             }
         }
+    }
+    
+    private var paletteDescription: String {
+        if camera.adaptivePaletteEnabled && camera.bitsPerPixel <= 8 {
+            return "adaptive"
+        }
+        return colorFormatName(camera.bitsPerPixel)
     }
     
     private var magnificationGesture: some Gesture {
@@ -248,6 +270,7 @@ struct ContentView: View {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         pendingSavePixelBits = camera.bitsPerPixel
         pendingSaveDither = camera.ditherEnabled
+        pendingSaveAdaptivePalette = camera.adaptivePaletteEnabled && camera.bitsPerPixel <= 8
         camera.capture()
         
         withAnimation(.easeInOut(duration: 0.2)) {

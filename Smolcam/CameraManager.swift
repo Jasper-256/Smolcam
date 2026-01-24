@@ -17,6 +17,7 @@ class CameraManager: NSObject, ObservableObject {
     @Published var deviceOrientation: UIImage.Orientation = .up
     @Published var ditherEnabled = false
     @Published var zoomLevel: CGFloat = 1.0
+    @Published var adaptivePaletteEnabled = false
     
     var backgroundWidth = 12
     var backgroundHeight = 16
@@ -44,6 +45,23 @@ class CameraManager: NSObject, ObservableObject {
     private let textureCache: CVMetalTextureCache
     private var processedTexture: MTLTexture?
     
+    // Adaptive palette pipelines
+    private let clearHistogramPipeline: MTLComputePipelineState
+    private let buildHistogramPipeline: MTLComputePipelineState
+    private let initColorBoxPipeline: MTLComputePipelineState
+    private let medianCutSplitParallelPipeline: MTLComputePipelineState
+    private let computePaletteColorsPipeline: MTLComputePipelineState
+    private let buildPaletteLUTPipeline: MTLComputePipelineState
+    private let applyAdaptivePalettePipeline: MTLComputePipelineState
+    
+    // Adaptive palette buffers
+    private var histogramBuffer: MTLBuffer?
+    private var colorBoxBuffer: MTLBuffer?
+    private var paletteBuffer: MTLBuffer?
+    private var paletteLUTBuffer: MTLBuffer?  // 32x32x32 LUT for fast palette lookup
+    private let histogramSize = 32 * 32 * 32
+    private let maxPaletteColors = 256
+    
     // For MTKView rendering
     weak var metalView: MTKView?
     private var currentTexture: MTLTexture?
@@ -60,6 +78,24 @@ class CameraManager: NSObject, ObservableObject {
               let vertexFunc = library.makeFunction(name: "vertexPassthrough"),
               let fragFunc = library.makeFunction(name: "fragmentPassthrough") else {
             fatalError("Metal init failed")
+        }
+        
+        // Adaptive palette pipelines
+        guard let clearHistogramKernel = library.makeFunction(name: "clearHistogram"),
+              let clearHistogramPipeline = try? device.makeComputePipelineState(function: clearHistogramKernel),
+              let buildHistogramKernel = library.makeFunction(name: "buildHistogram"),
+              let buildHistogramPipeline = try? device.makeComputePipelineState(function: buildHistogramKernel),
+              let initColorBoxKernel = library.makeFunction(name: "initColorBox"),
+              let initColorBoxPipeline = try? device.makeComputePipelineState(function: initColorBoxKernel),
+              let medianCutSplitParallelKernel = library.makeFunction(name: "medianCutSplitParallel"),
+              let medianCutSplitParallelPipeline = try? device.makeComputePipelineState(function: medianCutSplitParallelKernel),
+              let computePaletteColorsKernel = library.makeFunction(name: "computePaletteColors"),
+              let computePaletteColorsPipeline = try? device.makeComputePipelineState(function: computePaletteColorsKernel),
+              let buildPaletteLUTKernel = library.makeFunction(name: "buildPaletteLUT"),
+              let buildPaletteLUTPipeline = try? device.makeComputePipelineState(function: buildPaletteLUTKernel),
+              let applyAdaptivePaletteKernel = library.makeFunction(name: "applyAdaptivePalette"),
+              let applyAdaptivePalettePipeline = try? device.makeComputePipelineState(function: applyAdaptivePaletteKernel) else {
+            fatalError("Adaptive palette pipeline init failed")
         }
         
         let renderDesc = MTLRenderPipelineDescriptor()
@@ -81,9 +117,35 @@ class CameraManager: NSObject, ObservableObject {
         self.renderPipeline = renderPipeline
         self.textureCache = textureCache
         
+        // Adaptive palette pipelines
+        self.clearHistogramPipeline = clearHistogramPipeline
+        self.buildHistogramPipeline = buildHistogramPipeline
+        self.initColorBoxPipeline = initColorBoxPipeline
+        self.medianCutSplitParallelPipeline = medianCutSplitParallelPipeline
+        self.computePaletteColorsPipeline = computePaletteColorsPipeline
+        self.buildPaletteLUTPipeline = buildPaletteLUTPipeline
+        self.applyAdaptivePalettePipeline = applyAdaptivePalettePipeline
+        
         super.init()
         setupSession()
         startOrientationUpdates()
+        setupAdaptivePaletteBuffers()
+    }
+    
+    private func setupAdaptivePaletteBuffers() {
+        // Histogram buffer: 32x32x32 uint values
+        histogramBuffer = device.makeBuffer(length: histogramSize * MemoryLayout<UInt32>.size, options: .storageModeShared)
+        
+        // Color box buffer: up to 256 boxes (for 256 colors max)
+        // Each ColorBox is 32 bytes (uint3 minC, uint3 maxC, uint pixelCount, uint padding)
+        colorBoxBuffer = device.makeBuffer(length: maxPaletteColors * 32, options: .storageModeShared)
+        
+        // Palette buffer: up to 256 float3 colors (each float3 is 16 bytes aligned)
+        paletteBuffer = device.makeBuffer(length: maxPaletteColors * MemoryLayout<SIMD3<Float>>.stride, options: .storageModeShared)
+        
+        // LUT buffer: 32x32x32 entries, each containing two float3 (nearest + secondNearest)
+        // PaletteLUTEntry is 32 bytes (two float3, each padded to 16 bytes in Metal)
+        paletteLUTBuffer = device.makeBuffer(length: histogramSize * 32, options: .storageModeShared)
     }
     
     private func setupSession() {
@@ -239,7 +301,7 @@ class CameraManager: NSObject, ObservableObject {
         shouldCapture = true
     }
     
-    private func processToTexture(_ pixelBuffer: CVPixelBuffer, bits: Int, dither: Bool) -> MTLTexture? {
+    private func processToTexture(_ pixelBuffer: CVPixelBuffer, bits: Int, dither: Bool, adaptivePalette: Bool) -> MTLTexture? {
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         
@@ -253,6 +315,11 @@ class CameraManager: NSObject, ObservableObject {
             processedTexture = device.makeTexture(descriptor: desc)
         }
         guard let outTex = processedTexture else { return nil }
+        
+        // Use adaptive palette for bits <= 8, otherwise use standard quantization
+        if adaptivePalette && bits <= 8 {
+            return processWithAdaptivePalette(inTexture: inTexture, outTexture: outTex, bits: bits, dither: dither, width: width, height: height)
+        }
         
         guard let cmdBuffer = commandQueue.makeCommandBuffer(),
               let encoder = cmdBuffer.makeComputeCommandEncoder() else { return nil }
@@ -275,6 +342,102 @@ class CameraManager: NSObject, ObservableObject {
         cmdBuffer.waitUntilCompleted()
         
         return outTex
+    }
+    
+    private func processWithAdaptivePalette(inTexture: MTLTexture, outTexture: MTLTexture, bits: Int, dither: Bool, width: Int, height: Int) -> MTLTexture? {
+        guard let histogramBuffer = histogramBuffer,
+              let colorBoxBuffer = colorBoxBuffer,
+              let paletteBuffer = paletteBuffer,
+              let paletteLUTBuffer = paletteLUTBuffer,
+              let cmdBuffer = commandQueue.makeCommandBuffer() else { return nil }
+        
+        let paletteSize = 1 << bits
+        let tgSize = MTLSize(width: 16, height: 16, depth: 1)
+        let tgCount = MTLSize(width: (width + 15) / 16, height: (height + 15) / 16, depth: 1)
+        
+        // Clear histogram
+        if let enc = cmdBuffer.makeComputeCommandEncoder() {
+            enc.setComputePipelineState(clearHistogramPipeline)
+            enc.setBuffer(histogramBuffer, offset: 0, index: 0)
+            enc.dispatchThreads(MTLSize(width: histogramSize, height: 1, depth: 1),
+                               threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+            enc.endEncoding()
+        }
+        
+        // Build histogram
+        if let enc = cmdBuffer.makeComputeCommandEncoder() {
+            enc.setComputePipelineState(buildHistogramPipeline)
+            enc.setTexture(inTexture, index: 0)
+            enc.setBuffer(histogramBuffer, offset: 0, index: 0)
+            enc.dispatchThreadgroups(tgCount, threadsPerThreadgroup: tgSize)
+            enc.endEncoding()
+        }
+        
+        // Initialize first color box
+        if let enc = cmdBuffer.makeComputeCommandEncoder() {
+            enc.setComputePipelineState(initColorBoxPipeline)
+            enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
+            enc.setBuffer(histogramBuffer, offset: 0, index: 1)
+            enc.dispatchThreads(MTLSize(width: 1, height: 1, depth: 1),
+                               threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
+            enc.endEncoding()
+        }
+        
+        // Parallel median cut: log2(paletteSize) iterations, each doubling the box count
+        // Level 0: 1 box -> 2 boxes, Level 1: 2 boxes -> 4 boxes, etc.
+        var levelOffset: Int32 = 1
+        while levelOffset < Int32(paletteSize) {
+            if let enc = cmdBuffer.makeComputeCommandEncoder() {
+                enc.setComputePipelineState(medianCutSplitParallelPipeline)
+                enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
+                enc.setBuffer(histogramBuffer, offset: 0, index: 1)
+                enc.setBytes(&levelOffset, length: 4, index: 2)
+                enc.dispatchThreads(MTLSize(width: Int(levelOffset), height: 1, depth: 1),
+                                   threadsPerThreadgroup: MTLSize(width: min(Int(levelOffset), 256), height: 1, depth: 1))
+                enc.endEncoding()
+            }
+            levelOffset *= 2
+        }
+        
+        // Compute palette colors
+        var paletteSizeVal = Int32(paletteSize)
+        if let enc = cmdBuffer.makeComputeCommandEncoder() {
+            enc.setComputePipelineState(computePaletteColorsPipeline)
+            enc.setBuffer(colorBoxBuffer, offset: 0, index: 0)
+            enc.setBuffer(histogramBuffer, offset: 0, index: 1)
+            enc.setBuffer(paletteBuffer, offset: 0, index: 2)
+            enc.setBytes(&paletteSizeVal, length: 4, index: 3)
+            enc.dispatchThreads(MTLSize(width: paletteSize, height: 1, depth: 1),
+                               threadsPerThreadgroup: MTLSize(width: min(paletteSize, 256), height: 1, depth: 1))
+            enc.endEncoding()
+        }
+        
+        // Build LUT: maps each 32x32x32 RGB bin to nearest/second-nearest palette colors
+        if let enc = cmdBuffer.makeComputeCommandEncoder() {
+            enc.setComputePipelineState(buildPaletteLUTPipeline)
+            enc.setBuffer(paletteLUTBuffer, offset: 0, index: 0)
+            enc.setBuffer(paletteBuffer, offset: 0, index: 1)
+            enc.setBytes(&paletteSizeVal, length: 4, index: 2)
+            enc.dispatchThreads(MTLSize(width: histogramSize, height: 1, depth: 1),
+                               threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+            enc.endEncoding()
+        }
+        
+        // Apply palette using LUT lookup
+        var ditherVal: Int32 = dither ? 1 : 0
+        if let enc = cmdBuffer.makeComputeCommandEncoder() {
+            enc.setComputePipelineState(applyAdaptivePalettePipeline)
+            enc.setTexture(inTexture, index: 0)
+            enc.setTexture(outTexture, index: 1)
+            enc.setBuffer(paletteLUTBuffer, offset: 0, index: 0)
+            enc.setBytes(&ditherVal, length: 4, index: 1)
+            enc.dispatchThreadgroups(tgCount, threadsPerThreadgroup: tgSize)
+            enc.endEncoding()
+        }
+        
+        cmdBuffer.commit()
+        cmdBuffer.waitUntilCompleted()
+        return outTexture
     }
     
     private func textureToImage(_ texture: MTLTexture) -> UIImage? {
@@ -378,8 +541,9 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         let bits = bitsPerPixel
         let dither = ditherEnabled
         let capture = shouldCapture
+        let adaptivePalette = adaptivePaletteEnabled && bits <= 8
         
-        guard let texture = processToTexture(pb, bits: bits, dither: dither) else { return }
+        guard let texture = processToTexture(pb, bits: bits, dither: dither, adaptivePalette: adaptivePalette) else { return }
         
         // Update background snapshot
         let w = backgroundWidth, h = backgroundHeight
