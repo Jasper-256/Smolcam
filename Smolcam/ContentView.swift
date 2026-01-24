@@ -195,7 +195,7 @@ struct ContentView: View {
             pendingSavePixelBits = nil
             pendingSaveDitherMode = nil
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, ditherMode: ditherMode) else { return }
+                guard let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, ditherModeName: ditherModeNames[ditherMode]) else { return }
                 Task {
                     try? await PHPhotoLibrary.shared().performChanges {
                         let request = PHAssetCreationRequest.forAsset()

@@ -3,8 +3,8 @@ import ImageIO
 import Compression
 import CoreGraphics
 
-nonisolated func imageDataWithMetadata(_ cgImage: CGImage, pixelBits: Int, ditherMode: Int) -> Data? {
-    let exifText = "Smolcam | \(pixelBits)-bit | \(ditherModeNames[ditherMode])"
+nonisolated func imageDataWithMetadata(_ cgImage: CGImage, pixelBits: Int, ditherModeName: String) -> Data? {
+    let exifText = "Smolcam | \(pixelBits)-bit | \(ditherModeName)"
     
     // Use indexed PNG for 8 bits or less (256 colors max)
     if pixelBits <= 8 {
