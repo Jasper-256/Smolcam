@@ -4,7 +4,6 @@ import Combine
 import Metal
 import MetalKit
 
-let isMac = ProcessInfo.processInfo.isiOSAppOnMac
 let hasHomeButton: Bool = {
     guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
           let window = scene.windows.first else { return false }
@@ -13,7 +12,7 @@ let hasHomeButton: Bool = {
 
 class CameraManager: NSObject, ObservableObject {
     @Published var capturedImage: UIImage?
-    @Published var isFront = isMac
+    @Published var isFront = false
     @Published var bitsPerPixel = 8
     @Published var deviceOrientation: UIImage.Orientation = .up
     @Published var ditherEnabled = false
@@ -28,7 +27,6 @@ class CameraManager: NSObject, ObservableObject {
     private var backCameraMaxOpticalZoom: CGFloat = 1.0
     
     var displayZoom: CGFloat { zoomLevel / baseZoomFactor }
-    var minDisplayZoom: CGFloat { 1.0 / baseZoomFactor }
     
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()

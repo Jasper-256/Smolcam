@@ -2,13 +2,9 @@ import SwiftUI
 import Photos
 import MetalKit
 
-private let colorFormatNames: [Int: String] = [
-    8: "RGB332",
-    16: "RGB565"
-]
-
 private func colorFormatName(_ bitsPerPixel: Int) -> String {
-    if let name = colorFormatNames[bitsPerPixel] { return name }
+    let names: [Int: String] = [8: "RGB332", 16: "RGB565"]
+    if let name = names[bitsPerPixel] { return name }
     let b = bitsPerPixel / 3
     return "RGB\(b)\(b)\(b)"
 }
@@ -74,9 +70,7 @@ struct ContentView: View {
                     }
                 }
                 .aspectRatio(480.0/640.0, contentMode: .fit)
-                .simultaneousGesture(TapGesture(count: 2).onEnded {
-                    if !isMac { flip() }
-                })
+                .simultaneousGesture(TapGesture(count: 2).onEnded(flip))
                 .gesture(magnificationGesture)
                 
                 ZStack {
@@ -86,23 +80,21 @@ struct ContentView: View {
                             .frame(width: 70, height: 70)
                     }
                     
-                    if !isMac {
-                        HStack {
-                            Button { openPhotos() } label: {
-                                Image(systemName: "photo")
-                                    .font(.system(size: 25))
-                                    .foregroundColor(.white)
-                                    .rotationEffect(.degrees(iconRotation))
-                                    .frame(width: 70, height: 70)
-                            }
-                            Spacer()
-                            Button(action: flip) {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .font(.system(size: 28))
-                                    .foregroundColor(.white)
-                                    .rotationEffect(.degrees(iconRotation))
-                                    .frame(width: 70, height: 70)
-                            }
+                    HStack {
+                        Button { openPhotos() } label: {
+                            Image(systemName: "photo")
+                                .font(.system(size: 25))
+                                .foregroundColor(.white)
+                                .rotationEffect(.degrees(iconRotation))
+                                .frame(width: 70, height: 70)
+                        }
+                        Spacer()
+                        Button(action: flip) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 28))
+                                .foregroundColor(.white)
+                                .rotationEffect(.degrees(iconRotation))
+                                .frame(width: 70, height: 70)
                         }
                     }
                 }
@@ -148,7 +140,7 @@ struct ContentView: View {
                         .font(.system(size: 14))
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, (UIDevice.current.userInterfaceIdiom != .phone || hasHomeButton) ? 20 : 0)
+                .padding(.bottom, hasHomeButton ? 20 : 0)
             }
         }
         .statusBarHidden(true)
@@ -233,7 +225,6 @@ struct ContentView: View {
     }
     
     private func updateIconRotation(animated: Bool = true) {
-        guard UIDevice.current.userInterfaceIdiom != .pad else { return }
         let target: Double = switch camera.deviceOrientation {
             case .left: 90
             case .right: -90
