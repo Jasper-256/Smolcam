@@ -657,7 +657,8 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         let bits = bitsPerPixel
         let dither = ditherEnabled && bits < 24
         let capture = shouldCapture
-        let adaptivePalette = adaptivePaletteEnabled && bits <= 8
+        // 2-bit and 4-bit modes always use adaptive palette
+        let adaptivePalette = (adaptivePaletteEnabled && bits <= 8) || bits == 2 || bits == 4
         
         guard let texture = processToTexture(pb, bits: bits, dither: dither, adaptivePalette: adaptivePalette) else { return }
         

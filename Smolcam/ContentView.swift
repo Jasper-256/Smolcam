@@ -103,7 +103,7 @@ struct ContentView: View {
                 
                 HStack(spacing: 8) {
                     HStack(spacing: 0) {
-                        ForEach([3, 6, 8, 12, 16, 24], id: \.self) { n in
+                        ForEach([2, 3, 4, 6, 8, 12, 16, 24], id: \.self) { n in
                             Button { camera.bitsPerPixel = n } label: {
                                 Text("\(n)")
                                     .font(.system(size: 16, weight: camera.bitsPerPixel == n ? .bold : .regular))
@@ -117,7 +117,9 @@ struct ContentView: View {
                     .cornerRadius(8)
                     
                     Button { camera.adaptivePaletteEnabled.toggle() } label: {
-                        let isSelected = camera.adaptivePaletteEnabled && camera.bitsPerPixel <= 8
+                        // For 2/4 bit modes, always show as selected (forced on)
+                        let forcedOn = camera.bitsPerPixel == 2 || camera.bitsPerPixel == 4
+                        let isSelected = forcedOn || (camera.adaptivePaletteEnabled && camera.bitsPerPixel <= 8)
                         Image(systemName: "paintpalette")
                             .font(.system(size: 16))
                             .frame(width: 44, height: 44)
@@ -126,8 +128,8 @@ struct ContentView: View {
                     }
                     .background(Color.white.opacity(0.2))
                     .cornerRadius(8)
-                    .opacity(camera.bitsPerPixel <= 8 ? 1.0 : 0.5)
-                    .disabled(camera.bitsPerPixel > 8)
+                    .opacity(camera.bitsPerPixel <= 8 && camera.bitsPerPixel != 2 && camera.bitsPerPixel != 4 ? 1.0 : 0.5)
+                    .disabled(camera.bitsPerPixel > 8 || camera.bitsPerPixel == 2 || camera.bitsPerPixel == 4)
                     
                     Button { camera.ditherEnabled.toggle() } label: {
                         let isSelected = camera.ditherEnabled && camera.bitsPerPixel < 24
@@ -197,7 +199,8 @@ struct ContentView: View {
     }
     
     private var paletteDescription: String {
-        if camera.adaptivePaletteEnabled && camera.bitsPerPixel <= 8 {
+        // 2-bit and 4-bit modes always use adaptive palette
+        if (camera.adaptivePaletteEnabled && camera.bitsPerPixel <= 8) || camera.bitsPerPixel == 2 || camera.bitsPerPixel == 4 {
             return "adaptive"
         }
         return colorFormatName(camera.bitsPerPixel)
@@ -280,7 +283,8 @@ struct ContentView: View {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         pendingSavePixelBits = camera.bitsPerPixel
         pendingSaveDither = camera.ditherEnabled && camera.bitsPerPixel < 24
-        pendingSaveAdaptivePalette = camera.adaptivePaletteEnabled && camera.bitsPerPixel <= 8
+        // 2-bit and 4-bit modes always use adaptive palette
+        pendingSaveAdaptivePalette = (camera.adaptivePaletteEnabled && camera.bitsPerPixel <= 8) || camera.bitsPerPixel == 2 || camera.bitsPerPixel == 4
         camera.capture()
         
         withAnimation(.easeInOut(duration: 0.2)) {
