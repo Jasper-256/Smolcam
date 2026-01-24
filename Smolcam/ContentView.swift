@@ -38,6 +38,36 @@ struct ContentView: View {
     @State private var lastMag: CGFloat = 0
     @State private var pendingSavePixelBits: Int?
     @State private var pendingSaveDither: Bool?
+    @State private var pendingSaveUseBlueNoise: Bool?
+    
+    private var ditherButtonEnabled: Bool {
+        camera.bitsPerPixel != 24
+    }
+    
+    private var ditherIcon: String {
+        if camera.bitsPerPixel == 24 || !camera.ditherEnabled {
+            return "circle.slash"
+        } else if camera.useBlueNoise {
+            return "snowflake"
+        } else {
+            return "checkerboard.rectangle"
+        }
+    }
+    
+    private func cycleDitherMode() {
+        if !camera.ditherEnabled {
+            // off -> bayer
+            camera.ditherEnabled = true
+            camera.useBlueNoise = false
+        } else if !camera.useBlueNoise {
+            // bayer -> blue noise
+            camera.useBlueNoise = true
+        } else {
+            // blue noise -> off
+            camera.ditherEnabled = false
+            camera.useBlueNoise = false
+        }
+    }
     
     var body: some View {
         ZStack {
@@ -115,16 +145,18 @@ struct ContentView: View {
                     .background(Color.white.opacity(0.2))
                     .cornerRadius(8)
                     
-                    Button { camera.ditherEnabled.toggle() } label: {
-                        Image(systemName: "checkerboard.rectangle")
-                            .rotationEffect(.degrees(90))
+                    Button { cycleDitherMode() } label: {
+                        Image(systemName: ditherIcon)
+                            .rotationEffect(ditherIcon == "checkerboard.rectangle" ? .degrees(90) : .degrees(0))
                             .font(.system(size: 16))
                             .frame(width: 44, height: 44)
-                            .background(camera.ditherEnabled && camera.bitsPerPixel != 24 ? Color.white : Color.clear)
-                            .foregroundColor(camera.bitsPerPixel == 24 ? .gray : (camera.ditherEnabled ? .black : .white))
+                            .foregroundColor(ditherButtonEnabled ? .white : .gray)
+                            .animation(nil, value: camera.ditherEnabled)
+                            .animation(nil, value: camera.useBlueNoise)
+                            .animation(nil, value: camera.bitsPerPixel)
                     }
-                    .disabled(camera.bitsPerPixel == 24)
-                    .background(Color.white.opacity(0.2))
+                    .disabled(!ditherButtonEnabled)
+                    .background(Color.white.opacity(ditherButtonEnabled ? 0.2 : 0.1))
                     .cornerRadius(8)
                 }
                 .padding(.horizontal, 20)
@@ -139,7 +171,7 @@ struct ContentView: View {
                         .foregroundColor(.gray)
                         .font(.system(size: 14))
                     
-                    Text(camera.ditherEnabled && camera.bitsPerPixel != 24 ? "dither on" : "dither off")
+                    Text(!camera.ditherEnabled || camera.bitsPerPixel == 24 ? "no dither" : (camera.useBlueNoise ? "blue noise dither" : "bayer dither"))
                         .foregroundColor(.gray)
                         .font(.system(size: 14))
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -161,11 +193,13 @@ struct ContentView: View {
             guard let img = newImage,
                   let cgImage = img.cgImage,
                   let pixelBits = pendingSavePixelBits,
-                  let dither = pendingSaveDither else { return }
+                  let dither = pendingSaveDither,
+                  let useBlueNoise = pendingSaveUseBlueNoise else { return }
             pendingSavePixelBits = nil
             pendingSaveDither = nil
+            pendingSaveUseBlueNoise = nil
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, dither: dither) else { return }
+                guard let data = imageDataWithMetadata(cgImage, pixelBits: pixelBits, dither: dither, useBlueNoise: useBlueNoise) else { return }
                 Task {
                     try? await PHPhotoLibrary.shared().performChanges {
                         let request = PHAssetCreationRequest.forAsset()
@@ -253,6 +287,7 @@ struct ContentView: View {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         pendingSavePixelBits = camera.bitsPerPixel
         pendingSaveDither = camera.ditherEnabled && camera.bitsPerPixel != 24
+        pendingSaveUseBlueNoise = camera.useBlueNoise
         camera.capture()
         
         withAnimation(.easeInOut(duration: 0.2)) {

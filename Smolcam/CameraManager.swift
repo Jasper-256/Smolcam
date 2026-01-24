@@ -16,6 +16,7 @@ class CameraManager: NSObject, ObservableObject {
     @Published var bitsPerPixel = 8
     @Published var deviceOrientation: UIImage.Orientation = .up
     @Published var ditherEnabled = false
+    @Published var useBlueNoise = false
     @Published var zoomLevel: CGFloat = 1.0
     
     var backgroundWidth = 12
@@ -259,12 +260,14 @@ class CameraManager: NSObject, ObservableObject {
         
         var bitsVal = Int32(bits)
         var ditherVal: Int32 = dither ? 1 : 0
+        var ditherTypeVal: Int32 = useBlueNoise ? 1 : 0
         
         encoder.setComputePipelineState(computePipeline)
         encoder.setTexture(inTexture, index: 0)
         encoder.setTexture(outTex, index: 1)
         encoder.setBytes(&bitsVal, length: 4, index: 0)
         encoder.setBytes(&ditherVal, length: 4, index: 1)
+        encoder.setBytes(&ditherTypeVal, length: 4, index: 2)
         
         let tgSize = MTLSize(width: 16, height: 16, depth: 1)
         let tgCount = MTLSize(width: (width + 15) / 16, height: (height + 15) / 16, depth: 1)
