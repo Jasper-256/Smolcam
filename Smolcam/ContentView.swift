@@ -165,7 +165,8 @@ struct ContentView: View {
                         .font(.system(size: 14))
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, hasHomeButton ? 20 : 0)
+                .padding(.vertical, -4)
+                .padding(.bottom, hasHomeButton ? 20 : 4)
             }
         }
         .statusBarHidden(true)
