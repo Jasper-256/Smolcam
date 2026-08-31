@@ -100,69 +100,58 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 20)
                 
-                GeometryReader { geometry in
-                    let spacing: CGFloat = 8
-                    let totalWidth = geometry.size.width
-                    let contentWidth = totalWidth - spacing
-                    let bitDepthWidth = contentWidth * 6 / 9
-                    let ditherWidth = contentWidth * 3 / 9
-                    
-                    HStack(spacing: spacing) {
-                        HStack(spacing: 0) {
-                            ForEach([3, 6, 8, 12, 16, 24], id: \.self) { n in
-                                Button { camera.bitsPerPixel = n } label: {
-                                    Text("\(n)")
-                                        .font(.system(size: 16, weight: camera.bitsPerPixel == n ? .bold : .regular))
-                                        .frame(maxWidth: .infinity, minHeight: 42)
-                                        .background(camera.bitsPerPixel == n ? Color.white : Color.clear)
-                                        .foregroundColor(camera.bitsPerPixel == n ? .black : .white)
-                                }
+                VStack(spacing: 10) {
+                    HStack(spacing: 0) {
+                        ForEach([3, 6, 8, 12, 16, 24], id: \.self) { n in
+                            Button { camera.bitsPerPixel = n } label: {
+                                Text("\(n)")
+                                    .font(.system(size: 16, weight: camera.bitsPerPixel == n ? .bold : .regular))
+                                    .frame(maxWidth: .infinity, minHeight: 42)
+                                    .background(camera.bitsPerPixel == n ? Color.white : Color.clear)
+                                    .foregroundColor(camera.bitsPerPixel == n ? .black : .white)
                             }
                         }
-                        .frame(width: bitDepthWidth)
-                        .background(Color.white.opacity(0.2))
-                        .cornerRadius(8)
-                        
-                        HStack(spacing: 0) {
-                            Button {
-                                camera.ditherMode = 0
-                            } label: {
-                                Image(systemName: "circle.slash")
-                                    .font(.system(size: 16))
-                                    .frame(maxWidth: .infinity, minHeight: 42)
-                                    .background(camera.ditherMode == 0 ? Color.white : Color.clear)
-                                    .foregroundColor(camera.ditherMode == 0 ? .black : .white)
-                            }
-                            
-                            Button {
-                                camera.ditherMode = 1
-                            } label: {
-                                Image(systemName: "checkerboard.rectangle")
-                                    .rotationEffect(.degrees(90))
-                                    .font(.system(size: 16))
-                                    .frame(maxWidth: .infinity, minHeight: 42)
-                                    .background(camera.ditherMode == 1 ? Color.white : Color.clear)
-                                    .foregroundColor(camera.ditherMode == 1 ? .black : .white)
-                            }
-                            
-                            Button {
-                                camera.ditherMode = 2
-                            } label: {
-                                Image(systemName: "aqi.medium")
-                                    .font(.system(size: 16))
-                                    .frame(maxWidth: .infinity, minHeight: 42)
-                                    .background(camera.ditherMode == 2 ? Color.white : Color.clear)
-                                    .foregroundColor(camera.ditherMode == 2 ? .black : .white)
-                            }
-                        }
-                        .frame(width: ditherWidth)
-                        .background(Color.white.opacity(0.2))
-                        .cornerRadius(8)
                     }
+                    .background(Color.white.opacity(0.2))
+                    .cornerRadius(8)
+
+                    HStack(spacing: 0) {
+                        Button {
+                            camera.ditherMode = 0
+                        } label: {
+                            Image(systemName: "circle.slash")
+                                .font(.system(size: 16))
+                                .frame(maxWidth: .infinity, minHeight: 42)
+                                .background(camera.ditherMode == 0 ? Color.white : Color.clear)
+                                .foregroundColor(camera.ditherMode == 0 ? .black : .white)
+                        }
+
+                        Button {
+                            camera.ditherMode = 1
+                        } label: {
+                            Image(systemName: "checkerboard.rectangle")
+                                .rotationEffect(.degrees(90))
+                                .font(.system(size: 16))
+                                .frame(maxWidth: .infinity, minHeight: 42)
+                                .background(camera.ditherMode == 1 ? Color.white : Color.clear)
+                                .foregroundColor(camera.ditherMode == 1 ? .black : .white)
+                        }
+
+                        Button {
+                            camera.ditherMode = 2
+                        } label: {
+                            Image(systemName: "aqi.medium")
+                                .font(.system(size: 16))
+                                .frame(maxWidth: .infinity, minHeight: 42)
+                                .background(camera.ditherMode == 2 ? Color.white : Color.clear)
+                                .foregroundColor(camera.ditherMode == 2 ? .black : .white)
+                        }
+                    }
+                    .background(Color.white.opacity(0.2))
+                    .cornerRadius(8)
                 }
-                .frame(height: 42)
                 .padding(.horizontal, 20)
-                .padding(.bottom, -4)
+                .padding(.bottom, -6)
                 
                 HStack {
                     Text("\(1 << camera.bitsPerPixel) colors (\(colorFormatName(camera.bitsPerPixel)))")
